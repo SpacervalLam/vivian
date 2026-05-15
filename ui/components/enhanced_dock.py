@@ -221,7 +221,7 @@ class EnhancedRightDock(QWidget):
 
 
 class EnhancedButton(QPushButton):
-    """增强版按钮"""
+    """增强版按钮 - 更丰富的交互效果"""
     
     def __init__(self, icon, tooltip, parent=None):
         super().__init__(parent)
@@ -231,7 +231,7 @@ class EnhancedButton(QPushButton):
         
         self.icon_text = icon
         self._init_ui()
-
+        
     def _init_ui(self):
         """初始化UI"""
         from PyQt5.QtWidgets import QVBoxLayout, QLabel
@@ -239,6 +239,7 @@ class EnhancedButton(QPushButton):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         
+        # 图标标签
         self.icon_label = QLabel(self.icon_text)
         self.icon_label.setAlignment(Qt.AlignCenter)
         self.icon_label.setStyleSheet("""
@@ -250,12 +251,14 @@ class EnhancedButton(QPushButton):
         
         layout.addWidget(self.icon_label)
         
+        # 设置按钮样式
         self._set_style()
         
+        # 初始化特效
         self.effect = QGraphicsOpacityEffect()
         self.effect.setOpacity(1.0)
         self.setGraphicsEffect(self.effect)
-
+        
     def _set_style(self):
         """设置按钮样式"""
         style = """

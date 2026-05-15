@@ -15,14 +15,14 @@ from PyQt5.QtCore import (QEasingCurve, QPoint, QPropertyAnimation, QRect, Qt,
 from PyQt5.QtGui import QColor, QCursor, QFont, QIcon
 from PyQt5.QtWidgets import (QAction, QApplication, QGraphicsDropShadowEffect,
                              QInputDialog, QLabel, QMainWindow, QMenu,
-                             QMessageBox, QSystemTrayIcon, QVBoxLayout,
-                             QWidget)
+                             QMessageBox, QPushButton, QSystemTrayIcon, 
+                             QVBoxLayout, QWidget)
 
 logger.remove()
 if sys.stdout is not None:
     logger.add(
         sys.stdout,
-        level="DEBUG",
+        level="INFO",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {module} | {message}",
     )
 
@@ -1031,7 +1031,11 @@ class DeskpetMainWindow(QMainWindow):
     def _show_memory_visualization(self):
         from ui.memory_visualization_window import MemoryVisualizationWindow
 
-        self.memory_visualization_window = MemoryVisualizationWindow()
+        time_stamped_memory = None
+        if hasattr(self.brain, 'chat_chain') and self.brain.chat_chain:
+            time_stamped_memory = getattr(self.brain.chat_chain, 'time_stamped_memory', None)
+            
+        self.memory_visualization_window = MemoryVisualizationWindow(self.brain.memory_manager, time_stamped_memory)
         self.memory_visualization_window.show()
         self.child_windows.append(self.memory_visualization_window)
 
@@ -2098,7 +2102,6 @@ class DeskpetMainWindow(QMainWindow):
                 try:
                     self._start_btn_animation(self.voice_btn)
                 except Exception as e:
-                    import logger
                     logger.warning(f"启动按钮动画失败: {e}")
 
     def _ui_on_speech_stopped(self):
@@ -2199,7 +2202,6 @@ class DeskpetMainWindow(QMainWindow):
                 try:
                     self._stop_btn_animation(self.voice_btn)
                 except Exception as e:
-                    import logger
                     logger.warning(f"停止按钮动画失败: {e}")
 
     def _start_btn_animation(self, btn):
@@ -2215,14 +2217,12 @@ class DeskpetMainWindow(QMainWindow):
                 effect.setColor(QColor(255, 71, 87, 200))
                 effect.setBlurRadius(15)
         except Exception as e:
-            import logger
             logger.warning(f"设置按钮阴影效果失败: {e}")
 
     def _stop_btn_animation(self, btn):
         try:
             btn.setGraphicsEffect(None)
         except Exception as e:
-            import logger
             logger.warning(f"移除按钮阴影效果失败: {e}")
 
     def _show_message_bubble(self, text, duration_ms=None):

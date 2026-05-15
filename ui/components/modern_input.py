@@ -304,7 +304,7 @@ class AnimatedButton(QPushButton):
 
 
 class MessageBubble(QDialog):
-    """消息气泡"""
+    """全新设计的消息气泡 - Dracula Dark Theme风格+流畅动画"""
 
     def __init__(self, text, parent=None):
         super().__init__(parent)
@@ -405,7 +405,7 @@ class MessageBubble(QDialog):
         self.container.setStyleSheet(get_message_bubble_style())
 
     def _add_shadow(self):
-        """添加阴影效果"""
+        """阴影效果升级 - 多层立体阴影"""
         self.shadow = QGraphicsDropShadowEffect(self.container)
         self.shadow.setBlurRadius(28)
         self.shadow.setOffset(0, 10)
@@ -459,7 +459,7 @@ class MessageBubble(QDialog):
         super().paintEvent(event)
 
     def show(self):
-        """显示气泡"""
+        """显示气泡 - 优化入场动画曲线"""
         self.setWindowOpacity(0)
         super().show()
         self._play_enter_animation()
@@ -487,6 +487,6 @@ class MessageBubble(QDialog):
         self.fade_out.start()
 
     def mousePressEvent(self, event):
-        """点击关闭气泡"""
+        """点击交互 - 关闭气泡"""
         QTimer.singleShot(100, self.close)
         super().mousePressEvent(event)

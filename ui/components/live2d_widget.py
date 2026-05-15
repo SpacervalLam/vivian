@@ -27,7 +27,7 @@ from OpenGL.GL import (GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT, GL_DEPTH_TEST,
                        glClear, glClearColor, glViewport, glEnable, glBlendFunc)
 from PyQt5.QtCore import QMetaObject, QPoint, Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QCursor
-from PyQt5.QtWidgets import QMessageBox, QOpenGLWidget
+from PyQt5.QtWidgets import QApplication, QMessageBox, QOpenGLWidget
 
 from utils.config import BASE_DIR, LIVE2D_RENDER_CONFIG, MODEL_PATH
 
@@ -217,7 +217,7 @@ class Live2DWidget(QOpenGLWidget):
 
         self.last_think_time = time.time()
         self.auto_think_interval = 10.0
-       self.auto_think_priority = "medium"
+        self.auto_think_priority = "medium"
 
         self.is_moving = False
         self.start_pos = None

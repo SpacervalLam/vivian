@@ -15,20 +15,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.i18n import _
 
-try:
-    from core.memory_manager import memory_manager
-    from ui.components.memory_item_delegate import MemoryItemDelegate
-except ImportError:
-    logger.warning("Core components not found, running in UI Mock mode.")
-    memory_manager = None
-
-    class MemoryItemDelegate(QWidget):
-        def __init__(self):
-            super().__init__()
-            self.memories = []
-        
-        def update_data(self, d):
-            self.memories = d
+from ui.components.memory_item_delegate import MemoryItemDelegate
 
 
 COLORS = {
@@ -277,46 +264,58 @@ class MemoryDataLoader(QThread):
     data_loaded = pyqtSignal(dict)
     loading_progress = pyqtSignal(int)
 
-    def __init__(self, max_items=50):
+    def __init__(self, memory_manager, time_stamped_memory=None, max_items=50):
         super().__init__()
+        self.memory_manager = memory_manager
+        self.time_stamped_memory = time_stamped_memory
         self.max_items = max_items
 
     def run(self):
         try:
-            if not memory_manager:
+            if not self.memory_manager:
                 return
             self.loading_progress.emit(10)
 
             all_short_term = (
-                memory_manager.list_short_term_memories()
-                if hasattr(memory_manager, "list_short_term_memories")
+                self.memory_manager.list_short_term_memories()
+                if hasattr(self.memory_manager, "list_short_term_memories")
                 else []
             )
             self.loading_progress.emit(30)
 
-            all_mid_term = (
-                memory_manager.list_mid_term_memories()
-                if hasattr(memory_manager, "list_mid_term_memories")
+            all_long_term = (
+                self.memory_manager.list_long_term_memories()
+                if hasattr(self.memory_manager, "list_long_term_memories")
                 else []
             )
             self.loading_progress.emit(50)
 
-            all_long_term = (
-                memory_manager.list_long_term_memories()
-                if hasattr(memory_manager, "list_long_term_memories")
-                else []
-            )
+            all_long_term_preferences = []
+            if self.time_stamped_memory and hasattr(self.time_stamped_memory, "long_term_preferences"):
+                for pref in self.time_stamped_memory.long_term_preferences:
+                    memory_dict = {
+                        "id": f"pref_{pref.extracted_at.timestamp()}",
+                        "content": pref.content,
+                        "created_at": pref.extracted_at.strftime("%Y-%m-%d %H:%M:%S"),
+                        "memory_type": "长期偏好",
+                        "importance": pref.confidence,
+                        "source": "preference",
+                        "tags": ["preference"],
+                        "emotion": "",
+                    }
+                    all_long_term_preferences.append(memory_dict)
             self.loading_progress.emit(70)
 
-            all_memories = all_short_term + all_mid_term + all_long_term
+            all_memories = all_short_term + all_long_term + all_long_term_preferences
 
             self.loading_progress.emit(90)
 
             data = {
                 "memories": all_memories,
                 "short_term": all_short_term,
-                "mid_term": all_mid_term,
+                "mid_term": [],
                 "long_term": all_long_term,
+                "long_term_preferences": all_long_term_preferences,
             }
 
             self.data_loaded.emit(data)
@@ -486,8 +485,10 @@ class MemoryDetailPanel(QFrame):
 class ModernMemoryWindow(QMainWindow):
     """现代轻科技风格的记忆管理窗口"""
 
-    def __init__(self):
+    def __init__(self, memory_manager, time_stamped_memory=None):
         super().__init__()
+        self.memory_manager = memory_manager
+        self.time_stamped_memory = time_stamped_memory
         self.setWindowTitle(_("vivian_memory_core"))
         self.resize(int(1400 * 1.2), int(980 * 1.2))
 
@@ -499,7 +500,7 @@ class ModernMemoryWindow(QMainWindow):
 
         self.init_ui()
 
-        self.data_loader = MemoryDataLoader()
+        self.data_loader = MemoryDataLoader(self.memory_manager, self.time_stamped_memory)
         self.data_loader.data_loaded.connect(self.update_ui_data)
         self.data_loader.loading_progress.connect(self.update_progress)
 
@@ -612,9 +613,9 @@ class ModernMemoryWindow(QMainWindow):
             f"QTabBar::tab {{ font-size: 18px; padding: 12px 18px; min-width: 130px; }}"
         )
 
-        self.short_term_list = MemoryItemDelegate()
-        self.mid_term_list = MemoryItemDelegate()
-        self.long_term_list = MemoryItemDelegate()
+        self.short_term_list = MemoryItemDelegate(self.memory_manager)
+        self.mid_term_list = MemoryItemDelegate(self.memory_manager)
+        self.long_term_list = MemoryItemDelegate(self.memory_manager)
 
         self.tab_widget.addTab(self.short_term_list, "短期记忆")
         self.tab_widget.addTab(self.mid_term_list, "中期记忆")
@@ -696,6 +697,10 @@ class ModernMemoryWindow(QMainWindow):
 
         if "long_term" in data:
             long_term_memories = data["long_term"]
+            
+            if "long_term_preferences" in data:
+                long_term_memories = long_term_memories + data["long_term_preferences"]
+            
             self.long_term_list.update_data(long_term_memories)
             self.long_term_label.setText(f"长期: {len(long_term_memories)}")
 
@@ -722,8 +727,8 @@ class ModernMemoryWindow(QMainWindow):
 
         if reply:
             try:
-                if memory_manager:
-                    memory_manager.clear_all_memories()
+                if self.memory_manager:
+                    self.memory_manager.clear_all_memories()
                 self.load_memory_data()
                 ModernConfirmDialog.confirm(
                     self,

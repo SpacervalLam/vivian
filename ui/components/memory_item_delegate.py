@@ -20,10 +20,7 @@ sys.path.append(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 
-try:
-    from core.memory_manager import memory_manager
-except ImportError:
-    memory_manager = None
+
 
 
 COLORS = {
@@ -46,8 +43,9 @@ class MemoryItemDelegate(QWidget):
     展示记忆详细内容，支持回放、删除和加星操作
     """
 
-    def __init__(self):
+    def __init__(self, memory_manager=None):
         super().__init__()
+        self.memory_manager = memory_manager
         self.init_ui()
 
         # 记忆数据
@@ -256,17 +254,33 @@ class MemoryItemDelegate(QWidget):
     def _add_memory_item(self, memory, search_text=""):
         """
         添加单个记忆项到列表
+        支持对象格式和字典格式的记忆数据
         """
         item = QListWidgetItem()
 
-        memory_type = (
-            _("short_term_memory") if memory.__class__.__name__ == "ShortTermMemory" else _("long_term_memory")
-        )
+        is_dict = isinstance(memory, dict)
+        
+        if is_dict:
+            memory_class_name = memory.get("memory_type", "LongTermMemory")
+            if memory_class_name == "长期偏好":
+                memory_type = _("long_term_memory")
+            else:
+                memory_type = _("long_term_memory")
+        else:
+            memory_class_name = memory.__class__.__name__
+            memory_type = (
+                _("short_term_memory") if memory_class_name == "ShortTermMemory" else _("long_term_memory")
+            )
 
-        role = getattr(memory, "role", "user")
+        if is_dict:
+            role = memory.get("role", "user")
+            content = memory.get("content", "")
+        else:
+            role = getattr(memory, "role", "user")
+            content = memory.content
+            
         color_bar_color = "#2ecc71" if role == "user" else COLORS['accent_purple']
 
-        content = memory.content
         if content.startswith("User: "):
             content = content[6:]
         elif content.startswith("AI: "):
@@ -313,9 +327,14 @@ class MemoryItemDelegate(QWidget):
 
         top_row = QHBoxLayout()
 
-        is_short_term = memory.__class__.__name__ == "ShortTermMemory"
+        is_short_term = (not is_dict and memory_class_name == "ShortTermMemory")
+        
         if not is_short_term:
-            importance_color = self._get_importance_color(memory.importance)
+            if is_dict:
+                importance = memory.get("importance", 0.5)
+            else:
+                importance = memory.importance
+            importance_color = self._get_importance_color(importance)
             dot = QLabel("●")
             dot.setStyleSheet(f"color: {importance_color}; font-size: 16px;")
             top_row.addWidget(dot)
@@ -326,7 +345,18 @@ class MemoryItemDelegate(QWidget):
 
         top_row.addStretch()
 
-        time_str = memory.created_at.strftime("%Y-%m-%d %H:%M")
+        if is_dict:
+            time_str = memory.get("created_at", "")
+            if not time_str:
+                time_str = "未知时间"
+            elif len(time_str) > 16:
+                time_str = time_str[:16]
+        else:
+            if hasattr(memory, "created_at") and memory.created_at:
+                time_str = memory.created_at.strftime("%Y-%m-%d %H:%M")
+            else:
+                time_str = "未知时间"
+                
         time_lbl = QLabel(time_str)
         time_lbl.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 16px;")
         top_row.addWidget(time_lbl)
@@ -444,13 +474,13 @@ class MemoryItemDelegate(QWidget):
         try:
             # 获取存储对象并删除
             if memory_type == "short_term":
-                memory_manager.short_term_store.delete_memory(
+                self.memory_manager.short_term_store.delete_memory(
                     self.current_memory.id
                 )
             else:
-                memory_manager.long_term_store.delete_memory(self.current_memory.id)
-                if hasattr(memory_manager, "chroma_store"):
-                    memory_manager.chroma_store.delete_memory(
+                self.memory_manager.long_term_store.delete_memory(self.current_memory.id)
+                if hasattr(self.memory_manager, "chroma_store"):
+                    self.memory_manager.chroma_store.delete_memory(
                         self.current_memory.id
                     )
 
@@ -478,12 +508,22 @@ class MemoryItemDelegate(QWidget):
         self.memory_list.clear()
 
         for memory in self.memories:
-            if search_text and search_text not in memory.content.lower():
+            is_dict = isinstance(memory, dict)
+            
+            if is_dict:
+                content = memory.get("content", "")
+                memory_class_name = memory.get("memory_type", "LongTermMemory")
+                importance = memory.get("importance", 0.5)
+            else:
+                content = memory.content
+                memory_class_name = memory.__class__.__name__
+                importance = memory.importance if hasattr(memory, "importance") else 0.5
+            
+            if search_text and search_text not in content.lower():
                 continue
 
-            is_short_term = memory.__class__.__name__ == "ShortTermMemory"
+            is_short_term = (not is_dict and memory_class_name == "ShortTermMemory")
             if not is_short_term:
-                importance = memory.importance
                 if importance_filter == _("high_importance") and importance <= 0.7:
                     continue
                 elif importance_filter == _("medium_importance") and (
