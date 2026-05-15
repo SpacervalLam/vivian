@@ -1,0 +1,177 @@
+# ================
+# Python
+# ================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ================
+# Virtual Environment
+# ================
+venv/
+ENV/
+env/
+.venv
+venv_packaging/
+.conda/
+
+# ================
+# IDE
+# ================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# ================
+# Environment variables
+# ================
+.env
+.env.local
+.env.*
+
+# ================
+# OS
+# ================
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ================
+# Logs
+# ================
+*.log
+logs/
+
+# ================
+# PyQt compiled files
+# ================
+*.pyc
+
+# ================
+# Data directories
+# ================
+memory/
+chromadb/
+cache/
+data/db/
+data/cache/
+
+# ================
+# Model files
+# ================
+minilm/config_sentence_transformers.json
+minilm_config/
+minilm/*.safetensors
+tokenizer/*.json
+tokenizer/*.txt
+models/
+
+# ================
+# Database
+# ================
+*.db-journal
+*.sqlite3
+.chroma/
+*.db
+
+# ================
+# Test files
+# ================
+test_write.txt
+test_output/
+
+# ================
+# Packaging
+# ================
+build/
+dist/
+*.spec
+*.exe
+
+# ================
+# Temporary files
+# ================
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# ================
+# Third-party tools
+# ================
+open-interpreter/
+memoryos-agent/
+ClaudeCode-main/
+langchain-master/
+
+# ================
+# Live2D model files
+# ================
+Vivian/*.png
+Vivian/*.json
+Vivian/*.moc3
+Vivian/*.can3
+Vivian/*.exp3.json
+Vivian/*.motion3.json
+Vivian/*.physics3.json
+Vivian/*.model3.json
+Vivian/*.cdi3.json
+Vivian/*.vtube.json
+Vivian/*.model3.cdi3
+Vivian/*.model3.json
+
+# ================
+# Configuration files (user-specific)
+# ================
+ai_config.json
+chat_history_config.json
+os_display_config.json
+proactive_speak_config.json
+config.yaml.local
+config.local.yaml
+
+# ================
+# User data
+# ================
+AppData/
+user_data/
+screenshots/
+
+# ================
+# Image files (except in assets)
+# ================
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.webp
+!assets/**/*.png
+!assets/**/*.jpg
+!assets/**/*.jpeg
+!assets/**/*.gif

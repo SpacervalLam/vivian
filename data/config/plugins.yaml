@@ -1,0 +1,5 @@
+# Plugin manifest for Vivian
+# Add your plugins here to enable them
+# Example:
+# - entry: plugins.my_plugin.plugin:MyPlugin
+#   enabled: true

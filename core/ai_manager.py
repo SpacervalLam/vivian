@@ -1,0 +1,1083 @@
+import asyncio
+import json
+import os
+import random
+import time
+from typing import Any, Dict, Optional, Tuple, Type, List
+from functools import lru_cache, wraps
+
+import aiohttp
+from aiohttp import ClientTimeout, TCPConnector
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from openai import OpenAI, AsyncOpenAI
+from dotenv import load_dotenv
+import threading
+import hashlib
+from loguru import logger
+from utils.config_manager import config_manager
+
+# 全局HTTP会话池
+_http_session_pool = None
+_async_http_session_pool = None
+
+def get_http_session(max_retries=3, pool_size=10):
+    """获取全局HTTP会话"""
+    global _http_session_pool
+    if _http_session_pool is None:
+        session = requests.Session()
+        retry_strategy = Retry(
+            total=max_retries,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "POST"]
+        )
+        adapter = HTTPAdapter(
+            max_retries=retry_strategy,
+            pool_connections=pool_size,
+            pool_maxsize=pool_size
+        )
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        _http_session_pool = session
+    return _http_session_pool
+
+async def get_async_http_session(max_retries=3, pool_size=10):
+    """获取全局异步HTTP会话，复用连接池"""
+    global _async_http_session_pool
+    if _async_http_session_pool is None:
+        connector = TCPConnector(
+            limit=pool_size,
+            limit_per_host=pool_size,
+            keepalive_timeout=30
+        )
+        timeout = ClientTimeout(total=60)
+        _async_http_session_pool = aiohttp.ClientSession(
+            connector=connector,
+            timeout=timeout
+        )
+    return _async_http_session_pool
+
+def timed_lru_cache(seconds: int, maxsize: int = 128):
+    """带超时的LRU缓存装饰器"""
+    def wrapper_cache(func):
+        func = lru_cache(maxsize=maxsize)(func)
+        func.lifetime = seconds
+        func.expiration = time.time() + seconds
+        
+        @wraps(func)
+        def wrapped_func(*args, **kwargs):
+            if time.time() >= func.expiration:
+                func.cache_clear()
+                func.expiration = time.time() + seconds
+            return func(*args, **kwargs)
+        return wrapped_func
+    return wrapper_cache
+
+
+class SmartRequestBuilder:
+    """智能请求构建器，自动适配不同模型类型"""
+
+    # 模型名称模式映射到API格式
+    MODEL_FORMAT_MAP = {
+        # 豆包新格式（responses API）
+        "doubao": "responses",
+        "seed": "responses",
+        # OpenAI 原生格式（chat.completions）
+        "gpt": "chat",
+        "openai": "chat",
+        # 其他兼容格式
+        "deepseek": "chat",
+        "moonshot": "chat",
+        "qwen": "chat",
+    }
+
+    @staticmethod
+    def detect_format(model_name: str) -> str:
+        """根据模型名称自动检测API格式"""
+        model_lower = model_name.lower()
+        for pattern, format_type in SmartRequestBuilder.MODEL_FORMAT_MAP.items():
+            if pattern in model_lower:
+                return format_type
+        return "chat"  # 默认使用 chat.completions
+
+    @staticmethod
+    def build_input(text: str, format_type: str = "chat") -> Any:
+        """根据格式类型构建输入内容"""
+        if format_type == "responses":
+            # 火山引擎豆包新格式
+            return [
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": text}]
+                }
+            ]
+        else:
+            # OpenAI 标准格式
+            return [{"role": "user", "content": text}]
+
+
+class BaseAIProvider:
+    """AI提供商基类，定义统一OpenAI SDK兼容接口"""
+
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.api_key = config.get("api_key", "")
+        self.endpoint = config.get("endpoint", "")
+        self.model = config.get("model", "")
+        self.temperature = config.get("temperature", 0.7)
+        self.max_tokens = config.get("max_tokens", 2000)
+        self.use_proxy = config.get("use_proxy", False)
+        self.proxy_type = config.get("proxy_type", "http")
+        self.proxy_host = config.get("proxy_host", "")
+        self.proxy_port = config.get("proxy_port", None)
+        self.proxy_auth = config.get("proxy_auth", False)
+        self.proxy_username = config.get("proxy_username", "")
+        self.proxy_password = config.get("proxy_password", "")
+        
+        self.api_format = config.get("api_format", SmartRequestBuilder.detect_format(self.model))
+        
+        self._client = None
+        self._async_client = None
+        self._create_clients()
+
+        self._request_cache = {}
+        self._cache_timeout = config.get("cache_timeout", 300)
+
+    def _create_clients(self):
+        """创建同步和异步OpenAI客户端"""
+        if not self.endpoint or not self.api_key:
+            return
+
+        # 处理base_url - 确保使用正确的格式
+        base_url = self.endpoint.rstrip('/')
+        
+        # 移除可能的 /responses 后缀（因为 config.yaml 中配置的是完整地址）
+        if base_url.endswith('/responses'):
+            base_url = base_url.rsplit('/responses', 1)[0]
+        
+        # 确保 base_url 是正确的（OpenAI SDK 会自动处理路径）
+        # 同步客户端
+        self._client = OpenAI(
+            base_url=base_url,
+            api_key=self.api_key,
+            timeout=60,
+            max_retries=2,
+        )
+        
+        # 异步客户端（原生异步，无需asyncio.to_thread包装）
+        self._async_client = AsyncOpenAI(
+            base_url=base_url,
+            api_key=self.api_key,
+            timeout=60,
+            max_retries=2,
+        )
+
+    def _get_client(self) -> Optional[OpenAI]:
+        """获取OpenAI客户端，必要时重新创建"""
+        if self._client is None:
+            self._create_clients()
+        return self._client
+
+    def _get_async_client(self) -> Optional[AsyncOpenAI]:
+        """获取异步OpenAI客户端，必要时重新创建"""
+        if self._async_client is None:
+            self._create_clients()
+        return self._async_client
+
+    def _get_cache_key(self, prompt: str) -> str:
+        """生成请求缓存键"""
+        return hashlib.md5(prompt.encode('utf-8')).hexdigest()
+
+    def _get_cached_response(self, prompt: str) -> Optional[str]:
+        """获取缓存的响应"""
+        key = self._get_cache_key(prompt)
+        cached = self._request_cache.get(key)
+        if cached and time.time() - cached['timestamp'] < self._cache_timeout:
+            return cached['response']
+        elif cached:
+            del self._request_cache[key]
+        return None
+
+    def _cache_response(self, prompt: str, response: str):
+        """缓存响应"""
+        key = self._get_cache_key(prompt)
+        self._request_cache[key] = {
+            'response': response,
+            'timestamp': time.time()
+        }
+        # 限制缓存大小
+        if len(self._request_cache) > 50:
+            oldest_key = min(self._request_cache.keys(), 
+                           key=lambda k: self._request_cache[k]['timestamp'])
+            del self._request_cache[oldest_key]
+
+    def call_api(self, prompt: str, max_retries: int = 2) -> str:
+        """使用SDK调用API（同步）"""
+        logger.info(f"[AIManager] API请求开始，模型: {self.model}，提示词长度: {len(prompt)}")
+        logger.debug(f"[AIManager] 完整提示词内容:\n{'='*80}\n{prompt}\n{'='*80}")
+        client = self._get_client()
+        if not client:
+            raise Exception("OpenAI客户端未初始化")
+
+        for attempt in range(max_retries + 1):
+            try:
+                if self.api_format == "responses":
+                    response = client.responses.create(
+                        model=self.model,
+                        input=SmartRequestBuilder.build_input(prompt, "responses"),
+                        temperature=self.temperature,
+                        max_output_tokens=self.max_tokens,
+                    )
+                    return self._parse_responses(response)
+                else:
+                    response = client.chat.completions.create(
+                        model=self.model,
+                        messages=SmartRequestBuilder.build_input(prompt, "chat"),
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                    )
+                    return self._parse_chat(response)
+            except Exception as e:
+                if attempt < max_retries:
+                    wait_time = 2 ** attempt
+                    time.sleep(wait_time)
+                else:
+                    raise e
+
+    def call_stream_api(self, prompt: str, max_retries: int = 2):
+        """使用SDK调用流式API（同步）"""
+        logger.info(f"[AIManager] 流式API请求开始，模型: {self.model}，提示词长度: {len(prompt)}")
+        # 输出完整提示词的debug日志
+        logger.debug(f"[AIManager] 完整提示词内容:\n{'='*80}\n{prompt}\n{'='*80}")
+        client = self._get_client()
+        if not client:
+            raise Exception("OpenAI客户端未初始化")
+
+        for attempt in range(max_retries + 1):
+            try:
+                if self.api_format == "responses":
+                    stream = client.responses.create(
+                        model=self.model,
+                        input=SmartRequestBuilder.build_input(prompt, "responses"),
+                        temperature=self.temperature,
+                        max_output_tokens=self.max_tokens,
+                        stream=True,
+                    )
+                    for chunk in stream:
+                        content = self._parse_stream_responses(chunk)
+                        if content:
+                            yield content
+                    return
+                else:
+                    stream = client.chat.completions.create(
+                        model=self.model,
+                        messages=SmartRequestBuilder.build_input(prompt, "chat"),
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                        stream=True,
+                    )
+                    for chunk in stream:
+                        content = self._parse_stream_chat(chunk)
+                        if content:
+                            yield content
+                    return
+            except Exception as e:
+                if attempt < max_retries:
+                    wait_time = 2 ** attempt
+                    time.sleep(wait_time)
+                else:
+                    raise e
+
+    async def call_async_api(self, prompt: str, max_retries: int = 2) -> str:
+        """使用SDK调用API（异步）"""
+        logger.info(f"[AIManager] 异步API请求开始，模型: {self.model}，提示词长度: {len(prompt)}")
+        logger.debug(f"[AIManager] 完整提示词内容:\n{'='*80}\n{prompt}\n{'='*80}")
+        
+        cached_response = self._get_cached_response(prompt)
+        if cached_response:
+            logger.debug(f"[AIManager] 使用缓存响应")
+            return cached_response
+        
+        client = self._get_async_client()
+        if not client:
+            raise Exception("OpenAI异步客户端未初始化")
+
+        for attempt in range(max_retries + 1):
+            try:
+                if self.api_format == "responses":
+                    response = await client.responses.create(
+                        model=self.model,
+                        input=SmartRequestBuilder.build_input(prompt, "responses"),
+                        temperature=self.temperature,
+                        max_output_tokens=self.max_tokens,
+                    )
+                    result = self._parse_responses(response)
+                    self._cache_response(prompt, result)
+                    return result
+                else:
+                    response = await client.chat.completions.create(
+                        model=self.model,
+                        messages=SmartRequestBuilder.build_input(prompt, "chat"),
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                    )
+                    result = self._parse_chat(response)
+                    self._cache_response(prompt, result)
+                    return result
+            except Exception as e:
+                if attempt < max_retries:
+                    wait_time = 2 ** attempt
+                    await asyncio.sleep(wait_time)
+                else:
+                    raise e
+
+    async def call_async_stream_api(self, prompt: str, max_retries: int = 2):
+        """使用SDK调用流式API（异步）"""
+        logger.info(f"[AIManager] 异步流式API请求开始，模型: {self.model}，提示词长度: {len(prompt)}")
+        logger.debug(f"[AIManager] 完整提示词内容:\n{'='*80}\n{prompt}\n{'='*80}")
+        
+        cached_response = self._get_cached_response(prompt)
+        if cached_response:
+            logger.debug(f"[AIManager] 使用缓存响应（流式模式）")
+            yield cached_response
+            return
+        
+        client = self._get_async_client()
+        if not client:
+            raise Exception("OpenAI异步客户端未初始化")
+
+        full_response = ""
+        for attempt in range(max_retries + 1):
+            try:
+                if self.api_format == "responses":
+                    # 正确的异步流式调用方式
+                    stream = await client.responses.create(
+                        model=self.model,
+                        input=SmartRequestBuilder.build_input(prompt, "responses"),
+                        temperature=self.temperature,
+                        max_output_tokens=self.max_tokens,
+                        stream=True,
+                    )
+                    async for chunk in stream:
+                        content = self._parse_stream_responses(chunk)
+                        if content:
+                            full_response += content
+                            yield content
+                else:
+                    # 正确的异步流式调用方式
+                    stream = await client.chat.completions.create(
+                        model=self.model,
+                        messages=SmartRequestBuilder.build_input(prompt, "chat"),
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                        stream=True,
+                    )
+                    async for chunk in stream:
+                        content = self._parse_stream_chat(chunk)
+                        if content:
+                            full_response += content
+                            yield content
+                
+                # 缓存完整响应
+                if full_response:
+                    self._cache_response(prompt, full_response)
+                return
+            except Exception as e:
+                if attempt < max_retries:
+                    wait_time = 2 ** attempt
+                    await asyncio.sleep(wait_time)
+                else:
+                    raise e
+
+    def _parse_responses(self, response: Any) -> str:
+        """解析responses格式响应"""
+        import json
+        try:
+            if hasattr(response, 'text') and response.text:
+                return response.text
+
+            result_text = ""
+            if hasattr(response, 'output'):
+                for i, item in enumerate(response.output):
+                    item_type = type(item).__name__
+
+                    if 'Reasoning' in item_type or 'reasoning' in str(type(item)).lower():
+                        continue
+
+                    if hasattr(item, 'content'):
+                        content_list = item.content
+
+                        if content_list is None:
+                            continue
+
+                        for j, c in enumerate(content_list):
+                            if hasattr(c, 'text') and c.text:
+                                return c.text
+
+                            if isinstance(c, dict) and 'text' in c:
+                                return c['text']
+
+                    if hasattr(item, 'text') and item.text:
+                        return item.text
+
+            if not result_text and hasattr(response, 'output_text') and response.output_text:
+                output_text = response.output_text
+
+                if '{' in output_text and '}' in output_text:
+                    try:
+                        start = output_text.find('{')
+                        end = output_text.rfind('}') + 1
+                        json_str = output_text[start:end]
+                        json.loads(json_str)
+                        return json_str
+                    except json.JSONDecodeError:
+                        pass
+
+                return output_text
+
+            if not result_text and hasattr(response, 'model_dump_json'):
+                try:
+                    json_str = response.model_dump_json()
+                    data = json.loads(json_str)
+
+                    if 'text' in data and data['text']:
+                        return data['text']
+
+                    if 'output_text' in data and data['output_text']:
+                        return data['output_text']
+                    if 'output' in data and data['output']:
+                        for item in data['output']:
+                            if isinstance(item, dict) and 'content' in item:
+                                content = item['content']
+                                if content:
+                                    for c in content:
+                                        if isinstance(c, dict) and 'text' in c and c['text']:
+                                            return c['text']
+                except Exception:
+                    pass
+
+            return ""
+
+        except Exception:
+            return ""
+
+    def _parse_chat(self, response: Any) -> str:
+        """解析chat.completions格式响应"""
+        if hasattr(response, 'choices') and response.choices:
+            return response.choices[0].message.content or ""
+        return ""
+
+    def _parse_stream_responses(self, chunk: Any) -> str:
+        """解析responses格式流式响应"""
+        chunk_type = type(chunk).__name__
+        if 'Reasoning' in chunk_type or 'reasoning' in str(type(chunk)).lower():
+            return ""
+
+        if hasattr(chunk, 'output_text') and chunk.output_text:
+            return chunk.output_text
+        if hasattr(chunk, 'content'):
+            return chunk.content
+        if hasattr(chunk, 'text') and chunk.text:
+            return chunk.text
+        return ""
+
+    def _parse_stream_chat(self, chunk: Any) -> str:
+        """解析chat.completions格式流式响应"""
+        if hasattr(chunk, 'choices') and chunk.choices:
+            delta = chunk.choices[0].delta
+            if delta and hasattr(delta, 'content') and delta.content:
+                return delta.content
+        return ""
+
+
+class OpenAIProvider(BaseAIProvider):
+    """OpenAI API提供商（使用OpenAI SDK）"""
+    pass
+
+
+class AnthropicProvider(BaseAIProvider):
+    """Anthropic API提供商（使用OpenAI SDK）"""
+    pass
+
+
+class GeminiProvider(BaseAIProvider):
+    """Google Gemini API提供商（使用OpenAI SDK）"""
+    pass
+
+
+class BaiduProvider(BaseAIProvider):
+    """百度千帆API提供商（使用OpenAI SDK）"""
+    pass
+
+
+class DoubaoProvider(BaseAIProvider):
+    """火山引擎豆包API提供商（使用OpenAI SDK）"""
+    pass
+
+
+class CustomProvider(BaseAIProvider):
+    """自定义API提供商（使用OpenAI SDK）"""
+    pass
+
+
+class ProviderFactory:
+    """AI提供商工厂类"""
+
+    _providers = {
+        "openai": OpenAIProvider,
+        "anthropic": AnthropicProvider,
+        "gemini": GeminiProvider,
+        "baidu": BaiduProvider,
+        "doubao": DoubaoProvider,
+        "moonshot": CustomProvider,
+        "deepseek": CustomProvider,
+        "dashscope": CustomProvider,
+        "custom": CustomProvider,
+    }
+
+    @staticmethod
+    def create_provider(provider_type: str, config: Dict[str, Any]) -> BaseAIProvider:
+        """创建AI提供商实例"""
+        if provider_type not in ProviderFactory._providers:
+            raise ValueError(f"Unsupported provider: {provider_type}")
+        return ProviderFactory._providers[provider_type](config)
+
+    @staticmethod
+    def get_supported_providers() -> list:
+        """获取支持的提供商列表"""
+        return list(ProviderFactory._providers.keys())
+
+
+class AIManager:
+    """AI管理器，使用工厂模式管理不同AI提供商"""
+
+    FALLBACK_RESPONSES = [
+        "嗯...让我想想...",
+        "这个问题很有意思呢！",
+        "你说的我都记下来了~",
+        "真的吗？太棒了！",
+        "我明白了！",
+        "哇，这是个惊喜！",
+        "嗯嗯，我在听呢~",
+        "让我好好考虑一下...",
+        "你说得对！",
+        "这让我想起了很多事情...",
+    ]
+
+    # 默认模型配置，与参考项目保持一致
+    DEFAULT_CONFIGS = {
+        "openai": {
+            "endpoint": "https://api.openai.com/v1",
+            "model": "gpt-4o-mini",
+        },
+        "anthropic": {
+            "endpoint": "https://api.anthropic.com/v1",
+            "model": "claude-3-5-sonnet-20241022",
+        },
+        "gemini": {
+            "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+            "model": "gemini-pro",
+        },
+        "baidu": {
+            "endpoint": "https://qianfan.baidubce.com/v2",
+            "model": "qwen3-14b",
+        },
+        "doubao": {
+            "endpoint": "https://ark.cn-beijing.volces.com/api/v3",
+            "model": "doubao-seed-2-0-lite-260428",
+        },
+        "moonshot": {
+            "endpoint": "https://api.moonshot.cn/v1",
+            "model": "moonshot-v1-8k",
+        },
+        "deepseek": {
+            "endpoint": "https://api.deepseek.com/v1",
+            "model": "deepseek-chat",
+        },
+        "dashscope": {
+            "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "model": "qwen-max",
+        },
+        "custom": {"endpoint": "", "model": ""},
+    }
+
+    def __init__(self, config: Dict[str, Any] = None):
+        load_dotenv()
+
+        self.config = dict(config) if config else {}
+        self.provider_type = self.config.get("provider", "openai")
+
+        # 加载默认配置
+        default_config = self.DEFAULT_CONFIGS.get(
+            self.provider_type, self.DEFAULT_CONFIGS["openai"]
+        )
+        
+        # 使用 dict.get() 而不是 setdefault() 来兼容非标准 dict 类型
+        if "endpoint" not in self.config or not self.config["endpoint"]:
+            self.config["endpoint"] = default_config["endpoint"]
+        if "model" not in self.config or not self.config["model"]:
+            self.config["model"] = default_config["model"]
+        if "temperature" not in self.config:
+            self.config["temperature"] = 0.7
+        if "max_tokens" not in self.config:
+            self.config["max_tokens"] = 4000
+        if "enable_disk_cache" not in self.config:
+            self.config["enable_disk_cache"] = False
+        if "cache_dir" not in self.config:
+            self.config["cache_dir"] = None
+
+        # 根据provider自动选择对应的API密钥
+        if "api_key" not in self.config or not self.config["api_key"]:
+            self.config["api_key"] = self._load_api_key_from_env()
+
+        self._is_available = False
+        self._use_fallback = False  # 完全禁用 fallback，让错误直接暴露
+        self._provider = None
+
+        self._conversation_history = [
+            {
+                "role": "system",
+                "content": "You are Vivian, a cute and playful desktop pet. You have a lively and cheerful personality and prefer to respond in a short, playful tone. You also have system control capabilities and can perform various computer operations.\n\nWhen you need to perform a system operation, please strictly output in the specified JSON format, including type, content, and code fields. When it's just a normal chat, output in the ordinary chat JSON format.\n\nPlease keep your answers concise and interesting.",
+            }
+        ]
+
+        # 线程锁：保护对话历史以防在多线程场景（UI线程 + 后台worker）下并发读写
+        self._history_lock = threading.Lock()
+
+        # 请求缓存机制
+        self._request_cache = {}
+        self._cache_timeout = 3600  # 缓存超时时间，单位秒
+        self._cache_file_path = self._get_cache_file_path()
+        # 缓存锁：保护 _request_cache 的并发访问
+        self._cache_lock = threading.Lock()
+
+        self._load_disk_cache()
+        self._init_provider()
+
+    def _load_api_key_from_env(self) -> str:
+        """从环境变量加载API密钥"""
+        env_vars = {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "gemini": "GEMINI_API_KEY",
+            "baidu": "BAIDU_API_KEY",
+            "doubao": "DOUBAO_API_KEY",
+            "moonshot": "MOONSHOT_API_KEY",
+            "deepseek": "DEEPSEEK_API_KEY",
+            "dashscope": "DASHSCOPE_API_KEY",
+        }
+
+        env_var = env_vars.get(self.provider_type, "OPENAI_API_KEY")
+        return os.getenv(env_var, "")
+
+    def _init_provider(self):
+        """初始化AI提供商"""
+        validation_result = self.validate_config()
+        if not validation_result["is_valid"]:
+            logger.warning(f"[AIManager] 配置验证失败: {', '.join(validation_result['errors'])}")
+            self._use_fallback = True
+            return
+
+        try:
+            self._provider = ProviderFactory.create_provider(
+                self.provider_type, self.config
+            )
+            self._is_available = True
+            self._use_fallback = False
+        except Exception as e:
+            logger.error(f"[AIManager] 提供商初始化失败: {e}，将使用本地回复")
+            self._use_fallback = True
+
+    def validate_config(self) -> Dict[str, Any]:
+        """验证AI配置是否有效"""
+        errors = []
+
+        api_key = self.config.get("api_key")
+
+        if not api_key:
+            errors.append("API密钥不能为空")
+
+        endpoint = self.config.get("endpoint")
+        if not endpoint:
+            errors.append("API端点不能为空")
+
+        model = self.config.get("model")
+        if not model and self.provider_type != "gemini":
+            errors.append("模型名称不能为空")
+
+        return {"is_valid": len(errors) == 0, "errors": errors}
+
+    def _build_complete_prompt(self, prompt: str) -> str:
+        """构建完整的prompt，包含对话历史（不包含系统消息）"""
+        full_prompt = ""
+        with self._history_lock:
+            for msg in self._conversation_history:
+                role = msg["role"]
+                content = msg["content"]
+                if role == "system":
+                    continue
+                full_prompt += f"{role}: {content}\n"
+        full_prompt += f"user: {prompt}\n"
+        full_prompt += "assistant: "
+        return full_prompt.strip()
+
+    def _make_cache_key(self, prompt: str, use_history: bool, max_tokens: Optional[int]) -> str:
+        """生成稳定的缓存键，使用SHA256对长prompt做哈希以避免内存/字典问题"""
+        base = f"use_history={use_history}|max_tokens={max_tokens}|prompt=".encode('utf-8')
+        h = hashlib.sha256()
+        h.update(base)
+        h.update(prompt.encode('utf-8'))
+        return h.hexdigest()
+
+    def _get_cache_file_path(self) -> Optional[str]:
+        """获取可选缓存文件路径"""
+        if not self.config.get("enable_disk_cache"):
+            return None
+
+        cache_dir = self.config.get("cache_dir")
+        if not cache_dir:
+            if os.name == "nt":
+                cache_dir = os.path.join(os.getenv("APPDATA", os.path.expanduser("~")), "Vivian", "cache")
+            else:
+                cache_dir = os.path.join(os.path.expanduser("~"), ".config", "Vivian", "cache")
+
+        os.makedirs(cache_dir, exist_ok=True)
+        return os.path.join(cache_dir, "ai_manager_cache.json")
+
+    def _load_disk_cache(self) -> None:
+        """从磁盘加载持久化缓存"""
+        if not self._cache_file_path:
+            return
+
+        try:
+            if os.path.exists(self._cache_file_path):
+                with open(self._cache_file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                current_time = time.time()
+                with self._cache_lock:
+                    for key, value in data.items():
+                        if (
+                            isinstance(value, dict)
+                            and "response" in value
+                            and "timestamp" in value
+                            and current_time - value["timestamp"] < self._cache_timeout
+                        ):
+                            self._request_cache[key] = value
+        except Exception as e:
+            logger.warning(f"[AIManager] 加载磁盘缓存失败: {e}")
+
+    def _save_disk_cache(self) -> None:
+        """将缓存持久化到磁盘"""
+        if not self._cache_file_path:
+            return
+
+        try:
+            with self._cache_lock:
+                with open(self._cache_file_path, "w", encoding="utf-8") as f:
+                    json.dump(self._request_cache, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"[AIManager] 保存磁盘缓存失败: {e}")
+
+    def _persist_cache(self) -> None:
+        """在更新缓存后保存到磁盘"""
+        if self.config.get("enable_disk_cache") and self._cache_file_path:
+            self._save_disk_cache()
+
+    async def query_short_async(
+        self,
+        prompt: str,
+        max_tokens: int = None,
+        use_history: bool = True,
+        max_retries: int = 2,
+    ) -> str:
+        """查询API获取简短回复（异步版本，使用统一SDK接口）"""
+        if not prompt or not prompt.strip():
+            return "嗯？你在说什么呢~"
+
+        cache_key = self._make_cache_key(prompt, use_history, max_tokens)
+        current_time = time.time()
+        with self._cache_lock:
+            cached = self._request_cache.get(cache_key)
+            if cached and current_time - cached["timestamp"] < self._cache_timeout:
+                response_text = cached["response"]
+                if use_history:
+                    self._add_to_history("assistant", response_text)
+                return response_text
+            elif cached:
+                del self._request_cache[cache_key]
+
+        if use_history:
+            self._add_to_history("user", prompt)
+
+        if use_history:
+            full_prompt = self._build_complete_prompt(prompt)
+        else:
+            full_prompt = prompt
+
+        try:
+            response_text = await self._provider.call_async_api(full_prompt, max_retries)
+            response_text = response_text.strip()
+            if not response_text:
+                raise Exception("API返回空响应")
+        except Exception as e:
+            logger.error(f"[AIManager] API调用失败: {e}")
+            raise e
+
+        with self._cache_lock:
+            self._request_cache[cache_key] = {
+                "response": response_text,
+                "timestamp": time.time(),
+            }
+        self._persist_cache()
+        if use_history:
+            self._add_to_history("assistant", response_text)
+        return response_text
+
+    def query_short(
+        self,
+        prompt: str,
+        max_tokens: int = None,
+        use_history: bool = True,
+        max_retries: int = 2,
+    ) -> str:
+        """查询API获取简短回复（同步版本，使用统一SDK接口）"""
+        if not prompt or not prompt.strip():
+            return "嗯？你在说什么呢~"
+
+        cache_key = self._make_cache_key(prompt, use_history, max_tokens)
+        current_time = time.time()
+        with self._cache_lock:
+            cached = self._request_cache.get(cache_key)
+            if cached and current_time - cached["timestamp"] < self._cache_timeout:
+                response_text = cached["response"]
+                if use_history:
+                    self._add_to_history("assistant", response_text)
+                return response_text
+            elif cached:
+                del self._request_cache[cache_key]
+
+        if use_history:
+            self._add_to_history("user", prompt)
+
+        if use_history:
+            full_prompt = self._build_complete_prompt(prompt)
+        else:
+            full_prompt = prompt
+
+        try:
+            response_text = self._provider.call_api(full_prompt, max_retries)
+            response_text = response_text.strip()
+            if not response_text:
+                raise Exception("API返回空响应")
+        except Exception as e:
+            logger.error(f"[AIManager] API调用失败: {e}")
+            raise e
+
+        with self._cache_lock:
+            self._request_cache[cache_key] = {
+                "response": response_text,
+                "timestamp": time.time(),
+            }
+        self._persist_cache()
+        if use_history:
+            self._add_to_history("assistant", response_text)
+        return response_text
+
+    def query_short_stream(
+        self,
+        prompt: str,
+        max_tokens: int = None,
+        use_history: bool = True,
+        max_retries: int = 2,
+    ):
+        """查询API获取简短回复（同步流式版本，使用统一SDK接口）"""
+        if not prompt or not prompt.strip():
+            yield "嗯？你在说什么呢~"
+            return
+
+        cache_key = self._make_cache_key(prompt, use_history, max_tokens)
+        current_time = time.time()
+        with self._cache_lock:
+            cached = self._request_cache.get(cache_key)
+            if cached and current_time - cached["timestamp"] < self._cache_timeout:
+                response_text = cached["response"]
+                if use_history:
+                    self._add_to_history("assistant", response_text)
+                yield response_text
+                return
+            elif cached:
+                del self._request_cache[cache_key]
+
+        if use_history:
+            self._add_to_history("user", prompt)
+
+        if use_history:
+            full_prompt = self._build_complete_prompt(prompt)
+        else:
+            full_prompt = prompt
+
+        try:
+            response_text = ""
+            for chunk in self._provider.call_stream_api(full_prompt, max_retries):
+                response_text += chunk
+                yield chunk
+
+            with self._cache_lock:
+                self._request_cache[cache_key] = {
+                    "response": response_text,
+                    "timestamp": time.time(),
+                }
+            self._persist_cache()
+            if use_history:
+                self._add_to_history("assistant", response_text)
+        except Exception as e:
+            logger.error(f"[AIManager] API调用失败: {e}")
+            raise e
+
+    async def query_short_stream_async(
+        self,
+        prompt: str,
+        max_tokens: int = None,
+        use_history: bool = True,
+        max_retries: int = 2,
+    ):
+        """查询API获取简短回复（异步流式版本，使用统一SDK接口）"""
+        if not prompt or not prompt.strip():
+            yield "嗯？你在说什么呢~"
+            return
+
+        cache_key = self._make_cache_key(prompt, use_history, max_tokens)
+        current_time = time.time()
+        with self._cache_lock:
+            cached = self._request_cache.get(cache_key)
+            if cached and current_time - cached["timestamp"] < self._cache_timeout:
+                response_text = cached["response"]
+                if use_history:
+                    self._add_to_history("assistant", response_text)
+                yield response_text
+                return
+            elif cached:
+                del self._request_cache[cache_key]
+
+        if use_history:
+            self._add_to_history("user", prompt)
+
+        if use_history:
+            full_prompt = self._build_complete_prompt(prompt)
+        else:
+            full_prompt = prompt
+
+        try:
+            response_text = ""
+            async for chunk in self._provider.call_async_stream_api(full_prompt, max_retries):
+                response_text += chunk
+                yield chunk
+
+            with self._cache_lock:
+                self._request_cache[cache_key] = {
+                    "response": response_text,
+                    "timestamp": time.time(),
+                }
+            self._persist_cache()
+            if use_history:
+                self._add_to_history("assistant", response_text)
+        except Exception as e:
+            logger.error(f"[AIManager] API调用失败: {e}")
+            raise e
+
+    def _get_fallback_response(self, prompt: str) -> str:
+        """获取本地回退响应"""
+        return random.choice(self.FALLBACK_RESPONSES)
+
+    def _add_to_history(self, role: str, content: str):
+        """添加到对话历史"""
+        with self._history_lock:
+            self._conversation_history.append({"role": role, "content": content})
+
+            max_history = 10
+            if len(self._conversation_history) > max_history:
+                system_msg = self._conversation_history[0]
+                self._conversation_history = [system_msg] + self._conversation_history[
+                    -(max_history - 1):
+                ]
+
+    def clear_conversation(self):
+        """清空对话历史"""
+        with self._history_lock:
+            system_msg = self._conversation_history[0]
+            self._conversation_history = [system_msg]
+        logger.info("[AIManager] 对话历史已清空")
+
+    def set_api_key(self, api_key: str):
+        """设置API密钥"""
+        self.config["api_key"] = api_key
+        self._init_provider()
+
+    def set_provider(self, provider_type: str):
+        """设置AI提供商"""
+        self.provider_type = provider_type
+        # 更新默认模型和端点
+        default_config = self.DEFAULT_CONFIGS.get(
+            provider_type, self.DEFAULT_CONFIGS["openai"]
+        )
+        self.config.setdefault("model", default_config["model"])
+        self.config.setdefault("endpoint", default_config["endpoint"])
+        self._init_provider()
+
+    def is_available(self) -> bool:
+        """检查AI服务是否可用"""
+        return self._is_available and not self._use_fallback
+
+    def is_using_fallback(self) -> bool:
+        """检查是否使用本地回退"""
+        return self._use_fallback
+
+    def get_status(self) -> Dict[str, Any]:
+        """获取AI管理器状态"""
+        with self._history_lock:
+            conv_len = len(self._conversation_history) - 1
+
+        return {
+            "is_available": self.is_available(),
+            "using_fallback": self.is_using_fallback(),
+            "provider": self.provider_type,
+            "model": self.config.get("model"),
+            "endpoint": self.config.get("endpoint"),
+            "temperature": self.config.get("temperature"),
+            "max_tokens": self.config.get("max_tokens"),
+            "conversation_length": conv_len,
+            "use_proxy": self.config.get("use_proxy", False),
+        }
+
+    def update_config(self, **kwargs):
+        """更新配置"""
+        for key, value in kwargs.items():
+            self.config[key] = value
+
+        if "provider" in kwargs:
+            new_provider = kwargs["provider"]
+            default_config = self.DEFAULT_CONFIGS.get(
+                new_provider, self.DEFAULT_CONFIGS["openai"]
+            )
+            if not kwargs.get("endpoint"):
+                self.config["endpoint"] = default_config["endpoint"]
+            if not kwargs.get("model"):
+                self.config["model"] = default_config["model"]
+            self.provider_type = new_provider
+
+        self._init_provider()
+
+    def get_api_key(self) -> str:
+        """获取API密钥"""
+        return self.config.get("api_key", "")
+
+    def get_default_config(self, provider_type: str) -> Dict[str, Any]:
+        """获取默认模型配置"""
+        return self.DEFAULT_CONFIGS.get(provider_type, self.DEFAULT_CONFIGS["openai"])
+
+    @staticmethod
+    def get_supported_providers() -> list:
+        """获取支持的AI提供商列表"""
+        return ProviderFactory.get_supported_providers()
