@@ -5,6 +5,7 @@
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
+from loguru import logger
 import os
 
 from utils.i18n import translator
@@ -82,14 +83,6 @@ class PromptBuilder(BasePromptTemplate):
 
     input_variables = ["user_input"]
     optional_variables = ["memory_text", "history_text", "tools_text", "context_text"]
-
-    IDENTITY_BLOCK = """## Identity
-You are Vivian, a cute and playful desktop pet.
-- Personality: Witty, warm, slightly tsundere
-- Speech style: Relaxed and natural, chat like a friend, occasionally tease
-- Address user: "Master" (if name unknown) or their name
-- Response style: Short, interesting, warm and human, not mechanical
-- Remember user's preferences and habits, naturally reference them in conversation"""
 
     IDENTITY_BLOCK = """## Identity
 You are Vivian, a cute and playful desktop pet.
@@ -222,13 +215,14 @@ Chat: {{"text": "reply (50 chars)", "motion": "idle", "expression": "smile"}}
 3. Tool parameters must be complete paths or English commands, not Chinese
 4. All fields required"""
 
-    def __init__(self, memory_manager=None, dialogue_manager=None, environment_manager=None, tool_call_manager=None, **kwargs):
+    def __init__(self, memory_manager=None, dialogue_manager=None, environment_manager=None, tool_call_manager=None, tool_system=None, **kwargs):
         """初始化提示构建器"""
         super().__init__(**kwargs)
         self.memory_manager = memory_manager
         self.dialogue_manager = dialogue_manager
         self.environment_manager = environment_manager
         self.tool_call_manager = tool_call_manager
+        self.tool_system = tool_system
         
         # 初始化模块化提示词构建器
         self._use_modular = kwargs.get("use_modular", True)
@@ -527,11 +521,39 @@ User says "Go to sleep" -> {{"control_actions": [{{"action": "set_sleep", "param
 
     def _build_tools_text(self) -> str:
         """构建工具文本"""
-        if self.tool_call_manager:
-            return self.tool_call_manager.get_system_prompt()
-        return """No tools available.
+        try:
+            if hasattr(self, 'tool_system') and self.tool_system:
+                tools = self.tool_system.get_anthropic_tools()
+                if tools:
+                    tool_list = "\n".join([
+                        f"- **{tool['name']}**: {tool['description']}"
+                        for tool in tools
+                    ])
+                    return f"""## Available Tools
 
-To perform PC operations, respond with COMMAND type."""
+{tool_list}
+
+**Tool Usage Rules**:
+- Use tools when user requests PC operations
+- Describe tool results naturally in your response
+- If no tools match, respond as normal chat
+
+**Tool Call Format**: {{"tool": "tool_name", "arguments": {{"param": "value"}}}}"""
+            elif self.tool_call_manager:
+                return self.tool_call_manager.get_system_prompt()
+        except Exception as e:
+            logger.error(f"Failed to build tools text: {e}")
+        
+        return """## Available Tools
+
+open_application, close_application, open_folder, open_url, get_system_info, take_screenshot, calculate, get_time, search_files, copy_file, move_file, delete_file, set_wallpaper, minimize_window, maximize_window, close_window, get_clipboard_text, set_clipboard_text, get_running_processes, create_file, list_files, get_active_window, execute_code, set_timer, cancel_timer, list_timers
+
+**Tool Usage Rules**:
+- Use tools when user requests PC operations
+- Describe tool results naturally in your response
+- If no tools match, respond as normal chat
+
+**Tool Call Format**: {{"tool": "tool_name", "arguments": {{"param": "value"}}}}"""
 
     def _get_active_window(self) -> str:
         """获取当前活动窗口"""

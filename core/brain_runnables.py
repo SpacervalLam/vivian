@@ -344,6 +344,7 @@ class BrainState(BaseModel):
     tool_call_executed: bool = Field(default=False, description="工具调用是否已执行")
     
     text: str = Field(default="", description="最终响应文本")
+    immediate_response_text: str = Field(default="", description="即时回复文本（工具执行前的回复）")
     motion: str = Field(default="idle", description="动作")
     expression: str = Field(default="", description="表情")
     importance_user: float = Field(default=0.3, description="用户侧重要性")
@@ -701,7 +702,22 @@ class PromptBuildingRunnable(VivianRunnable[BrainState, BrainState]):
                                 time_str = mem.created_at.strftime("%Y-%m-%d %H:%M") + " "
                             except:
                                 pass
-                        memory_parts.append(f"[记忆] {time_str}{mem.content}")
+                        
+                        # 添加角色前缀（如果content中没有前缀）
+                        role = ""
+                        content = mem.content
+                        if hasattr(mem, 'role'):
+                            if mem.role.lower() == "user":
+                                if not content.startswith("User: "):
+                                    role = "User: "
+                            elif mem.role.lower() == "assistant":
+                                if not content.startswith("AI: "):
+                                    role = "AI: "
+                        elif hasattr(mem, 'memory_type') and mem.memory_type == "user":
+                            if not content.startswith("User: "):
+                                role = "User: "
+                        
+                        memory_parts.append(f"[记忆] {time_str}{role}{content}")
                 
                 input.memory_text = "\n".join(memory_parts)
             elif self.memory_filter:
@@ -959,6 +975,7 @@ class AIResponseGenerationRunnable(VivianRunnable[BrainState, BrainState]):
         
         stream_callback = config.get("stream_callback")
         stream = config.get("stream", False)
+        self._saved_immediate_text = None
         
         async def ai_generate_func(prompt: str) -> str:
             if hasattr(self.ai_manager, "aquery_short"):
@@ -971,12 +988,24 @@ class AIResponseGenerationRunnable(VivianRunnable[BrainState, BrainState]):
         
         try:
             if self.tool_call_manager:
+                def on_immediate_response(immediate_text: str):
+                    """即时回复回调 - 在工具执行前立即显示初步回复"""
+                    if stream and stream_callback and immediate_text:
+                        logger.info(f"[AIResponse] 即时回复: {immediate_text[:50]}...")
+                        stream_callback(immediate_text)
+                    # 保存即时回复文本，之后会存入记忆
+                    self._saved_immediate_text = immediate_text
+                
                 final_response, tool_calls = await self.tool_call_manager.execute_multi_step(
-                    ai_generate_func, input.system_prompt
+                    ai_generate_func, 
+                    input.system_prompt,
+                    on_immediate_response=on_immediate_response
                 )
                 input.response_text = final_response
                 input.tool_calls = tool_calls
                 input.tool_call_executed = True
+                # 保存即时回复到 input，以便后续存入记忆
+                input.immediate_response_text = self._saved_immediate_text
                 
                 if stream and stream_callback and input.response_text:
                     stream_callback(input.response_text)
@@ -1191,8 +1220,10 @@ class UserMemorySavingRunnable(VivianRunnable[BrainState, BrainState]):
     def _save_user_memory_sync(self, content: str, importance: float, emotion: str):
         """后台线程同步保存"""
         try:
+            from core.memory_schema import MemoryNode
+            content_with_prefix = f"User: {content}" if not content.startswith("User: ") else content
             memory_node = MemoryNode(
-                content=content,
+                content=content_with_prefix,
                 role="user",
                 importance=importance,
                 emotion=emotion,
@@ -1236,16 +1267,36 @@ class MemorySavingRunnable(VivianRunnable[BrainState, BrainState]):
             return input
         
         try:
+            # 收集需要保存的AI回复文本（即时回复和最终回复）
+            ai_responses = []
+            
+            # 添加即时回复（如果存在且有效）
+            if hasattr(input, 'immediate_response_text') and input.immediate_response_text and input.immediate_response_text.strip():
+                ai_responses.append(input.immediate_response_text.strip())
+            
+            # 添加最终回复（如果存在且有效）
+            if input.text and input.text.strip():
+                final_text = input.text.strip()
+                # 如果即时回复和最终回复一样，就不重复保存
+                if not (len(ai_responses) > 0 and ai_responses[0] == final_text):
+                    ai_responses.append(final_text)
+            
             if self.use_time_stamped_memory:
                 if hasattr(input, 'time_stamped_memory') and input.time_stamped_memory:
                     input.time_stamped_memory.add_message(input.user_input, "human", input.importance_user)
-                    input.time_stamped_memory.add_message(input.text, "ai", input.importance_ai)
-                    logger.debug("[MemorySaving] 已保存到时间戳记忆系统")
+                    # 保存所有AI回复
+                    for i, response in enumerate(ai_responses):
+                        # 即时回复的重要性稍低
+                        importance = min(input.importance_ai, 0.25) if i == 0 else min(input.importance_ai, 0.3)
+                        input.time_stamped_memory.add_message(response, "ai", importance)
+                    logger.debug(f"[MemorySaving] 已保存{len(ai_responses)}条AI回复到时间戳记忆系统")
             
             if self.dialogue_manager:
                 self.dialogue_manager.add_message("user", input.user_input)
-                self.dialogue_manager.add_message("assistant", input.text)
-                self.dialogue_manager.check_and_update_cooldown(input.text)
+                # 只保存最后一个回复（最终回复）到对话管理器
+                if ai_responses:
+                    self.dialogue_manager.add_message("assistant", ai_responses[-1])
+                    self.dialogue_manager.check_and_update_cooldown(ai_responses[-1])
             
             if self.memory_manager:
                 try:
@@ -1253,20 +1304,25 @@ class MemorySavingRunnable(VivianRunnable[BrainState, BrainState]):
                     
                     from core.memory_schema import MemoryNode
                     
-                    if input.text.strip():
-                        ai_emotion = self.emotion_analyzer.analyze_emotion(input.text) if self.emotion_analyzer else "neutral"
+                    # 保存所有AI回复到记忆系统
+                    for i, response in enumerate(ai_responses):
+                        ai_emotion = self.emotion_analyzer.analyze_emotion(response) if self.emotion_analyzer else "neutral"
+                        # 即时回复的重要性稍低
+                        importance = min(input.importance_ai, 0.25) if i == 0 else min(input.importance_ai, 0.3)
+                        
                         await loop.run_in_executor(
                             None,
-                            lambda: self.memory_manager.add_memory_node(
+                            lambda r=response, imp=importance, e=ai_emotion: self.memory_manager.add_memory_node(
                                 MemoryNode(
-                                    content=input.text,
+                                    content=r,
                                     role="assistant",
-                                    importance=min(input.importance_ai, 0.3),
-                                    emotion=ai_emotion,
+                                    importance=imp,
+                                    emotion=e,
                                     source="chat"
                                 )
                             )
                         )
+                        logger.debug(f"[MemorySaving] 已保存AI回复{i+1}到记忆系统")
                     
                 except Exception as e:
                     logger.warning(f"[MemorySaving] 记忆保存失败: {e}")

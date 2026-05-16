@@ -3,6 +3,7 @@ import json
 import os
 import random
 import time
+from collections import deque
 from typing import Any, Dict, Optional, Tuple, Type, List
 from functools import lru_cache, wraps
 
@@ -144,6 +145,8 @@ class BaseAIProvider:
 
         self._request_cache = {}
         self._cache_timeout = config.get("cache_timeout", 300)
+        self._logged_prompt_hashes = set()
+        self._logged_prompt_queue = deque(maxlen=50)
 
     def _create_clients(self):
         """创建同步和异步OpenAI客户端"""
@@ -173,6 +176,18 @@ class BaseAIProvider:
             timeout=60,
             max_retries=2,
         )
+
+    def _log_full_prompt_once(self, prompt: str) -> None:
+        """仅在同一 provider 实例中首次遇到该 prompt 时输出完整日志，避免重复打印。"""
+        prompt_hash = hashlib.md5(prompt.encode('utf-8')).hexdigest()
+        if prompt_hash in self._logged_prompt_hashes:
+            return
+        self._logged_prompt_hashes.add(prompt_hash)
+        if len(self._logged_prompt_queue) == self._logged_prompt_queue.maxlen:
+            oldest = self._logged_prompt_queue.popleft()
+            self._logged_prompt_hashes.discard(oldest)
+        self._logged_prompt_queue.append(prompt_hash)
+        logger.debug(f"[AIManager] 完整提示词内容:\n{'='*80}\n{prompt}\n{'='*80}")
 
     def _get_client(self) -> Optional[OpenAI]:
         """获取OpenAI客户端，必要时重新创建"""
@@ -216,7 +231,7 @@ class BaseAIProvider:
     def call_api(self, prompt: str, max_retries: int = 2) -> str:
         """使用SDK调用API（同步）"""
         logger.info(f"[AIManager] API请求开始，模型: {self.model}，提示词长度: {len(prompt)}")
-        logger.debug(f"[AIManager] 完整提示词内容:\n{'='*80}\n{prompt}\n{'='*80}")
+        self._log_full_prompt_once(prompt)
         client = self._get_client()
         if not client:
             raise Exception("OpenAI客户端未初始化")
@@ -249,8 +264,7 @@ class BaseAIProvider:
     def call_stream_api(self, prompt: str, max_retries: int = 2):
         """使用SDK调用流式API（同步）"""
         logger.info(f"[AIManager] 流式API请求开始，模型: {self.model}，提示词长度: {len(prompt)}")
-        # 输出完整提示词的debug日志
-        logger.debug(f"[AIManager] 完整提示词内容:\n{'='*80}\n{prompt}\n{'='*80}")
+        self._log_full_prompt_once(prompt)
         client = self._get_client()
         if not client:
             raise Exception("OpenAI客户端未初始化")
@@ -293,7 +307,7 @@ class BaseAIProvider:
     async def call_async_api(self, prompt: str, max_retries: int = 2) -> str:
         """使用SDK调用API（异步）"""
         logger.info(f"[AIManager] 异步API请求开始，模型: {self.model}，提示词长度: {len(prompt)}")
-        logger.debug(f"[AIManager] 完整提示词内容:\n{'='*80}\n{prompt}\n{'='*80}")
+        self._log_full_prompt_once(prompt)
         
         cached_response = self._get_cached_response(prompt)
         if cached_response:
@@ -336,7 +350,7 @@ class BaseAIProvider:
     async def call_async_stream_api(self, prompt: str, max_retries: int = 2):
         """使用SDK调用流式API（异步）"""
         logger.info(f"[AIManager] 异步流式API请求开始，模型: {self.model}，提示词长度: {len(prompt)}")
-        logger.debug(f"[AIManager] 完整提示词内容:\n{'='*80}\n{prompt}\n{'='*80}")
+        self._log_full_prompt_once(prompt)
         
         cached_response = self._get_cached_response(prompt)
         if cached_response:

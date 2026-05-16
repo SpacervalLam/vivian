@@ -26,8 +26,14 @@ from core.json_processor import JSONProcessor
 from core.local_model import LocalModel
 from core.prompt_builder import PromptBuilder
 
-from core.tool_manager import BaseTool, ToolManager, ToolResult, tool
 from core.types import AIResponse, AITaskType
+from core.tools.v2 import (
+    ToolSystem,
+    PermissionContext,
+    PermissionMode,
+    register_builtin_tools,
+    get_tool_system,
+)
 from utils.config_manager import config_manager
 from utils.environment_manager import EnvironmentManager
 
@@ -132,38 +138,69 @@ class Brain:
         logger.debug("Emotion analyzer initialized")
 
     def _init_tool_manager(self):
-        """Initialize tool manager"""
-        self.tool_manager = ToolManager()
-        self._register_default_tools()
-
+        """Initialize tool manager using V2 tool system"""
         try:
-            from core.tools.system_tool_wrapper import register_all_system_tools
-            count = register_all_system_tools(self.tool_manager)
-            logger.debug(f"Registered {count} system tools")
+            self.tool_system = get_tool_system()
+            register_builtin_tools()
+            logger.debug("V2 Tool system initialized")
         except Exception as e:
-            logger.error(f"Failed to register system tools: {e}", exc_info=True)
+            logger.error(f"Failed to initialize V2 tool system: {e}", exc_info=True)
+            self.tool_system = ToolSystem()
+            register_builtin_tools()
+
+        self._init_permission_context()
 
         if self.main_window:
             try:
                 from core.window_control_tools import WindowControlTools
                 window_tools = WindowControlTools(self.main_window)
                 for tool in window_tools.get_all_tools():
-                    self.tool_manager.register_tool(tool)
+                    self.tool_system.register_tool(tool)
                 logger.debug("Window control tools registered")
             except Exception as e:
                 logger.error(f"Failed to register window control tools: {e}")
 
-        try:
-            from core.tools.tool_call_manager import init_tool_call_manager
-            self.tool_call_manager = init_tool_call_manager(self.tool_manager)
-            self.tool_call_manager.set_max_iterations(10)
-            logger.debug("Tool call manager initialized")
-        except Exception as e:
-            logger.error(f"Failed to initialize tool call manager: {e}")
-            from core.tool_system import ToolCallManager
-            self.tool_call_manager = ToolCallManager()
+        self._init_tool_call_manager_v2()
+        logger.debug("Tool system V2 initialized")
 
-        logger.debug("Tool manager initialized")
+    def _init_tool_call_manager_v2(self):
+        """Initialize V2 tool call manager with permission context"""
+        try:
+            from core.tools.tool_call_manager_v2 import init_tool_call_manager_v2
+            self.tool_call_manager = init_tool_call_manager_v2(
+                tool_system=self.tool_system,
+                permission_context=self.permission_context,
+            )
+            self.tool_call_manager.set_max_iterations(10)
+            logger.debug("V2 Tool call manager initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize V2 tool call manager: {e}")
+            from core.tools.tool_call_manager import get_tool_call_manager
+            self.tool_call_manager = get_tool_call_manager()
+
+    def _init_permission_context(self):
+        """Initialize permission context for V2 tool system"""
+        try:
+            self.permission_context = PermissionContext(
+                mode=PermissionMode.DEFAULT,
+                is_bypass_permissions_mode_available=True,
+                is_auto_mode_available=True,
+            )
+            
+            from utils.config_manager import config_manager
+            working_dirs = config_manager.get("security.working_directories", [])
+            if working_dirs:
+                for wd in working_dirs:
+                    from core.tools.v2.permission import AdditionalWorkingDirectory
+                    self.permission_context.additional_working_directories[wd] = AdditionalWorkingDirectory(
+                        path=wd,
+                        permissions={"read", "write", "delete"},
+                        is_read_only=False,
+                    )
+            logger.debug("Permission context initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize permission context: {e}")
+            self.permission_context = PermissionContext(mode=PermissionMode.BYPASS)
 
     def _init_memory_manager(self):
         """Initialize memory manager"""
@@ -199,8 +236,11 @@ class Brain:
     def _init_prompt_builder(self):
         """Initialize prompt builder"""
         self.prompt_builder = PromptBuilder(
-            self.memory_manager, self.dialogue_manager, self.environment_manager,
-            self.tool_call_manager
+            memory_manager=self.memory_manager,
+            dialogue_manager=self.dialogue_manager,
+            environment_manager=self.environment_manager,
+            tool_call_manager=self.tool_call_manager,
+            tool_system=self.tool_system,
         )
         logger.debug("Prompt builder initialized")
     

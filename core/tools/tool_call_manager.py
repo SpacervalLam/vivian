@@ -12,7 +12,7 @@
 import json
 import os
 import asyncio
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -465,24 +465,13 @@ class ToolCallManager:
             # 检查工具是否存在
             tool = self._tool_manager.get_tool(tool_name)
             if tool is None:
-                # 尝试执行系统工具
-                try:
-                    from core.tools.system_tools import execute_system_tool
-                    result = execute_system_tool(tool_name, **arguments)
-                    return ToolCallResult(
-                        success=result.get("success", False),
-                        result=result.get("result"),
-                        tool_name=tool_name,
-                        tool_call_id=tool_call_id
-                    )
-                except Exception as e:
-                    return ToolCallResult(
-                        success=False,
-                        result=None,
-                        tool_name=tool_name,
-                        tool_call_id=tool_call_id,
-                        error=f"工具不存在: {tool_name}, 错误: {str(e)}"
-                    )
+                return ToolCallResult(
+                    success=False,
+                    result=None,
+                    tool_name=tool_name,
+                    tool_call_id=tool_call_id,
+                    error=f"工具不存在: {tool_name}"
+                )
 
             # 执行工具
             logger.info(f"[ToolCallManager] 执行工具: {tool_name}, 参数: {arguments}")
@@ -510,7 +499,8 @@ class ToolCallManager:
         self,
         ai_generate_func,
         initial_prompt: str,
-        max_steps: int = None
+        max_steps: int = None,
+        on_immediate_response: Optional[Callable[[str], None]] = None,
     ) -> Tuple[str, List[ToolCall]]:
         """
         执行多轮工具调用
@@ -519,6 +509,7 @@ class ToolCallManager:
             ai_generate_func: AI生成函数，签名: async def(prompt: str) -> str
             initial_prompt: 初始提示
             max_steps: 最大步数，默认使用_max_iterations
+            on_immediate_response: 即时回复回调函数（用于在工具执行前立即返回初步回复）
 
         Returns:
             (最终回复, 工具调用历史)

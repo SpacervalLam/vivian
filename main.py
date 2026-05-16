@@ -22,7 +22,7 @@ logger.remove()
 if sys.stdout is not None:
     logger.add(
         sys.stdout,
-        level="INFO",
+        level="DEBUG",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {module} | {message}",
     )
 
@@ -95,6 +95,7 @@ class AIWorkerSignals(QObject):
     """AIWorker信号类，用于跨线程通信"""
     response_signal = pyqtSignal(dict)
     error_signal = pyqtSignal(Exception)
+    thinking_signal = pyqtSignal(bool)  # 思考状态信号，True表示开始思考，False表示结束
 
 class AIWorker(QRunnable):
     """后台工作者，负责与Brain通信，避免阻塞主界面 - 优化版"""
@@ -109,7 +110,7 @@ class AIWorker(QRunnable):
         self.signals = AIWorkerSignals()
         self._is_cancelled = False
         self._chunk_buffer = []
-        self._chunk_flush_threshold = 5
+        self._chunk_flush_threshold = 1
         self.setAutoDelete(True)  # 任务完成后自动删除
 
     @pyqtSlot()
@@ -121,6 +122,9 @@ class AIWorker(QRunnable):
         asyncio.set_event_loop(loop)
 
         try:
+            # 发送开始思考信号
+            self.signals.thinking_signal.emit(True)
+            
             response_data = loop.run_until_complete(
                 self.brain.athink(
                     self.user_input,
@@ -157,12 +161,14 @@ class AIWorker(QRunnable):
                 }
             )
         finally:
+            # 发送结束思考信号
+            self.signals.thinking_signal.emit(False)
             self.brain.is_thinking = False
             # 不关闭事件循环，复用
 
     def _emit_stream_chunk(self, chunk):
         if chunk and not self._is_cancelled:
-            logger.info(f"[AIWorker._emit_stream_chunk] 接收到chunk，长度: {len(chunk)}, 当前buffer: {len(self._chunk_buffer)}")
+            logger.debug(f"[AIWorker._emit_stream_chunk] 接收到chunk，长度: {len(chunk)}, 当前buffer: {len(self._chunk_buffer)}")
             self._chunk_buffer.append(chunk)
             # 达到阈值时批量发送，减少信号传递开销
             if len(self._chunk_buffer) >= self._chunk_flush_threshold:
@@ -171,7 +177,7 @@ class AIWorker(QRunnable):
     def _flush_buffer(self):
         if self._chunk_buffer:
             combined = ''.join(self._chunk_buffer)
-            logger.info(f"[AIWorker._flush_buffer] 发送stream_event，长度: {len(combined)}")
+            logger.debug(f"[AIWorker._flush_buffer] 发送stream_event，长度: {len(combined)}")
             self.signals.response_signal.emit({"type": "stream_event", "chunk": combined})
             self._chunk_buffer = []
 
@@ -549,7 +555,7 @@ class DeskpetMainWindow(QMainWindow):
         
         self._stream_buffer = ""
         self._stream_update_timer = None
-        self._stream_update_interval = 50
+        self._stream_update_interval = 30
         
         self._ui_update_queue = []
         self._ui_update_timer = None
@@ -565,6 +571,12 @@ class DeskpetMainWindow(QMainWindow):
         self.sig_speech_started.connect(self._ui_on_speech_started)
         self.sig_speech_stopped.connect(self._ui_on_speech_stopped)
         self.sig_stream_event.connect(self._ui_on_stream_event)
+        
+        # 思考状态计时器
+        self._thinking_animation_timer = QTimer(self)
+        self._thinking_animation_timer.setInterval(500)  # 每500ms更新一次
+        self._thinking_animation_timer.timeout.connect(self._update_thinking_animation)
+        self._thinking_dots_count = 0
 
     def _init_ui_update_optimization(self):
         self._stream_update_timer = QTimer(self)
@@ -606,23 +618,55 @@ class DeskpetMainWindow(QMainWindow):
         self._stream_buffer = ""
         self._has_streamed_content = False
 
+    def _extract_text_from_json_payload(self, payload: str) -> str:
+        """从JSON负载中提取最合理的文本字段，避免直接显示原始JSON。"""
+        try:
+            import json
+            data = json.loads(payload)
+        except Exception:
+            return ""
+
+        def extract(obj):
+            if isinstance(obj, dict):
+                if isinstance(obj.get("text"), str) and obj.get("text").strip():
+                    return obj.get("text").strip()
+                if isinstance(obj.get("content"), str) and obj.get("content").strip():
+                    return obj.get("content").strip()
+                content = obj.get("content")
+                if isinstance(content, list) and content:
+                    for item in content:
+                        if isinstance(item, dict):
+                            text_value = extract(item)
+                            if text_value:
+                                return text_value
+                        elif isinstance(item, str):
+                            return item.strip()
+                for key, value in obj.items():
+                    if isinstance(value, (dict, list)):
+                        nested = extract(value)
+                        if nested:
+                            return nested
+                return ""
+            elif isinstance(obj, list):
+                for item in obj:
+                    text_value = extract(item)
+                    if text_value:
+                        return text_value
+            return ""
+
+        return extract(data)
+
     def _update_streaming_bubble(self, text):
         if not text:
             return
             
         if text.startswith('{') or text.startswith('['):
-            try:
-                import json
-                data = json.loads(text)
-                if isinstance(data, dict) and 'text' in data:
-                    text = data['text']
-                elif isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict) and 'text' in data[0]:
-                    text = data[0]['text']
-                else:
-                    logger.debug("[_update_streaming_bubble] JSON格式但无法提取text字段")
-                    return
-            except json.JSONDecodeError:
-                pass
+            extracted = self._extract_text_from_json_payload(text)
+            if extracted:
+                text = extracted
+            else:
+                logger.debug("[_update_streaming_bubble] JSON格式但无法提取text字段")
+                return
             
         if hasattr(self, 'current_bubble') and self.current_bubble and self.current_bubble.isVisible():
             if hasattr(self.current_bubble, 'label') and hasattr(self.current_bubble, 'text'):
@@ -1482,6 +1526,7 @@ class DeskpetMainWindow(QMainWindow):
             worker = AIWorker(self.brain, user_input)
             
             worker.signals.response_signal.connect(self._on_ai_response_from_worker)
+            worker.signals.thinking_signal.connect(self._on_thinking_state_changed)
             
             if not hasattr(self, '_active_workers'):
                 self._active_workers = []
@@ -1798,17 +1843,23 @@ class DeskpetMainWindow(QMainWindow):
 
         try:
             if hasattr(ai_response, "text") and ai_response.text:
+                display_text = ai_response.text
+                if display_text.startswith('{') or display_text.startswith('['):
+                    extracted = self._extract_text_from_json_payload(display_text)
+                    if extracted:
+                        display_text = extracted
+
                 if has_streamed:
                     if hasattr(self, 'current_bubble') and self.current_bubble:
-                        self.current_bubble.label.setText(ai_response.text)
+                        self.current_bubble.label.setText(display_text)
                         self.current_bubble.adjustSize()
                     else:
                         logger.debug("[_update_ui_with_ai_response] 流式传输未创建气泡，创建新气泡")
-                        self._show_message_bubble(ai_response.text, duration_ms=5000)
+                        self._show_message_bubble(display_text, duration_ms=5000)
                 else:
                     if hasattr(self, "current_bubble") and self.current_bubble:
                         self.current_bubble.close()
-                    self._show_message_bubble(ai_response.text, duration_ms=5000)
+                    self._show_message_bubble(display_text, duration_ms=5000)
 
             if hasattr(ai_response, "expression") and ai_response.expression:
                 self.expression_manager.set_expression(
@@ -1933,24 +1984,8 @@ class DeskpetMainWindow(QMainWindow):
             close_count = streaming_text.count(close_brace)
 
             if open_count == close_count and open_count > 0:
-                try:
-                    import json
-                    data = json.loads(streaming_text)
-                    display_text = ""
-                    if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
-                        if 'text' in data[0]:
-                            display_text = data[0]['text']
-                        elif 'content' in data[0]:
-                            display_text = data[0]['content']
-                    elif isinstance(data, dict):
-                        if 'text' in data:
-                            display_text = data['text']
-                        elif 'content' in data:
-                            display_text = data['content']
-                    
-                    if not display_text:
-                        return
-                except json.JSONDecodeError:
+                display_text = self._extract_text_from_json_payload(streaming_text)
+                if not display_text:
                     return
             else:
                 return
@@ -2288,6 +2323,77 @@ class DeskpetMainWindow(QMainWindow):
 
         QTimer.singleShot(duration_ms, self.current_bubble.close)
         logger.debug(f"[_show_message_bubble] finished")
+
+    def _on_thinking_state_changed(self, is_thinking):
+        """处理思考状态变化"""
+        if is_thinking:
+            logger.info("[_on_thinking_state_changed] 开始思考")
+            self._thinking_dots_count = 0
+            self._thinking_animation_timer.start()
+            # 显示思考气泡
+            self._show_thinking_bubble()
+        else:
+            logger.info("[_on_thinking_state_changed] 结束思考")
+            self._thinking_animation_timer.stop()
+            # 关闭思考气泡
+            self._close_thinking_bubble()
+    
+    def _show_thinking_bubble(self):
+        """显示思考动画（大字体紫色显示）"""
+        if hasattr(self, "_thinking_label") and self._thinking_label:
+            self._thinking_label.close()
+        
+        from PyQt5.QtWidgets import QLabel
+        from PyQt5.QtGui import QFont, QColor
+        from PyQt5.QtCore import Qt
+        
+        self._thinking_label = QLabel(self)
+        thinking_text = self._get_thinking_animation_text()
+        self._thinking_label.setText(thinking_text)
+        
+        # 设置大字体和紫色
+        font = QFont()
+        font.setPointSize(24)
+        font.setBold(True)
+        self._thinking_label.setFont(font)
+        self._thinking_label.setStyleSheet("color: purple;")
+        
+        # 设置位置（宠物右侧）
+        pet_rect = self.frameGeometry()
+        label_x = pet_rect.x() + pet_rect.width() + 10
+        label_y = pet_rect.y() + 20
+        
+        self._thinking_label.move(label_x, label_y)
+        self._thinking_label.show()
+    
+    def _close_thinking_bubble(self):
+        """关闭思考动画"""
+        if hasattr(self, "_thinking_label") and self._thinking_label:
+            self._thinking_label.close()
+            self._thinking_label = None
+    
+    def _get_thinking_animation_text(self):
+        """获取思考动画文本（跳动的点效果）"""
+        # 动画帧：点在6个位置之间跳动，最后一帧是6个点
+        frames = [
+            "·.....",
+            ".·....",
+            "..·...",
+            "...·..",
+            "....·.",
+            ".....·",
+            "......"
+        ]
+        return frames[self._thinking_dots_count % len(frames)]
+    
+    def _update_thinking_animation(self):
+        """更新思考动画（跳动的点）"""
+        self._thinking_dots_count += 1
+        
+        if hasattr(self, "_thinking_label") and self._thinking_label:
+            thinking_text = self._get_thinking_animation_text()
+            self._thinking_label.setText(thinking_text)
+            self._thinking_label.adjustSize()
 
     def _toggle_sound(self):
         enabled = self.sound_toggle_action.isChecked()

@@ -1,33 +1,10 @@
 """
 工具模块 - Tools
 
-包含系统工具和工具调用管理：
-1. system_tools - 系统工具集
-2. tool_call_manager - 工具调用管理器
+包含工具调用管理和V2工具系统：
+1. tool_call_manager - 工具调用管理器
+2. v2 - V2工具系统
 """
-
-from .system_tools import (
-    SYSTEM_TOOLS,
-    get_all_tools_list,
-    execute_system_tool,
-    open_application,
-    close_application,
-    open_folder,
-    open_url,
-    set_wallpaper,
-    take_screenshot,
-    get_system_info,
-    get_clipboard_text,
-    set_clipboard_text,
-    search_files,
-    copy_file,
-    move_file,
-    delete_file,
-    minimize_window,
-    maximize_window,
-    close_window,
-    get_running_processes,
-)
 
 from .tool_call_manager import (
     ToolCallManager,
@@ -39,28 +16,22 @@ from .tool_call_manager import (
     init_tool_call_manager,
 )
 
+from .v2 import (
+    Tool,
+    ToolSystem,
+    ToolResult,
+    ToolUseContext,
+    PermissionContext,
+    PermissionMode,
+    PermissionResult,
+    ValidationResult,
+    build_tool,
+    register_tool,
+    get_tool_system,
+    register_builtin_tools,
+)
+
 __all__ = [
-    # 系统工具
-    "SYSTEM_TOOLS",
-    "get_all_tools_list",
-    "execute_system_tool",
-    "open_application",
-    "close_application",
-    "open_folder",
-    "open_url",
-    "set_wallpaper",
-    "take_screenshot",
-    "get_system_info",
-    "get_clipboard_text",
-    "set_clipboard_text",
-    "search_files",
-    "copy_file",
-    "move_file",
-    "delete_file",
-    "minimize_window",
-    "maximize_window",
-    "close_window",
-    "get_running_processes",
     # 工具调用管理器
     "ToolCallManager",
     "ToolCallStatus",
@@ -69,4 +40,17 @@ __all__ = [
     "ToolListTool",
     "get_tool_call_manager",
     "init_tool_call_manager",
+    # V2工具系统
+    "Tool",
+    "ToolSystem",
+    "ToolResult",
+    "ToolUseContext",
+    "PermissionContext",
+    "PermissionMode",
+    "PermissionResult",
+    "ValidationResult",
+    "build_tool",
+    "register_tool",
+    "get_tool_system",
+    "register_builtin_tools",
 ]

@@ -186,22 +186,22 @@ class MemorySelector:
         scores: Dict[str, float] = {}
         
         for sem_mem, score in semantic_results:
-            scores[sem_mem.id] = score * 0.6
+            scores[sem_mem.id] = score * 0.65
         
         if bm25_results:
             max_bm25 = max(score for _, score in bm25_results) or 1.0
             for memory, score in bm25_results:
                 normalized = score / max_bm25
-                scores[memory.id] = scores.get(memory.id, 0.0) + normalized * 0.4
+                scores[memory.id] = scores.get(memory.id, 0.0) + normalized * 0.35
         
         ranked: List[Tuple[Memory, float]] = []
         now = datetime.datetime.now()
         for memory in candidates:
             base = scores.get(memory.id, 0.0)
-            importance_factor = memory.importance * 0.2
+            importance_factor = memory.importance * 0.1
             age_hours = (now - memory.created_at).total_seconds() / 3600.0
             recency_factor = 1.0 / (1.0 + age_hours / 24.0)
-            final_score = base + importance_factor + recency_factor * 0.15
+            final_score = base + importance_factor + recency_factor * 0.1
             ranked.append((memory, final_score))
         
         ranked.sort(key=lambda x: x[1], reverse=True)
@@ -212,6 +212,14 @@ class MemorySelector:
         for memory, score in ranked:
             if memory.id in seen_ids:
                 continue
+            
+            memory_content = memory.content.strip()
+            if hasattr(memory, 'role') and memory.role.lower() == "user":
+                content_without_prefix = memory_content[6:] if memory_content.startswith("User: ") else memory_content
+                if content_without_prefix.strip() == query.strip():
+                    logger.debug(f"[select_memories] Skipping memory matching query: '{memory_content[:30]}...'")
+                    continue
+            
             seen_ids.add(memory.id)
             if memory.token_count is None:
                 memory.token_count = self.memory_manager._calculate_tokens(memory.content)
@@ -1346,7 +1354,7 @@ class MemoryManager:
         except Exception as e:
             logger.warning(f"生成可视化报告失败: {e}")
         
-        for memory in short_term_memories:
+        for memory in self.list_short_term_memories():
             self.short_term_store.delete_memory(memory.id)
     
     def _categorize_memories(self, memories: List[Memory]) -> Dict[str, List[Memory]]:
