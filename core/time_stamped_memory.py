@@ -28,15 +28,6 @@ class TimeStampedSummary(BaseModel):
     content: str = Field(..., description="总结内容")
     start_time: datetime.datetime = Field(..., description="开始时间")
     end_time: datetime.datetime = Field(..., description="结束时间")
-    contains_long_term: bool = Field(default=False, description="是否包含长期偏好")
-
-
-class LongTermPreference(BaseModel):
-    """长期偏好"""
-    content: str = Field(..., description="偏好内容")
-    extracted_at: datetime.datetime = Field(default_factory=datetime.datetime.now, description="提取时间")
-    confidence: float = Field(default=0.8, description="置信度")
-    source_conversation: str = Field(default="", description="来源对话")
 
 
 class TimeStampedMemory:
@@ -60,7 +51,6 @@ class TimeStampedMemory:
         
         self.raw_messages: List[TimeStampedMessage] = []
         self.summaries: List[TimeStampedSummary] = []
-        self.long_term_preferences: List[LongTermPreference] = []
         self._last_interaction_time: Optional[datetime.datetime] = None
         
         if self.memory_manager:
@@ -94,8 +84,6 @@ class TimeStampedMemory:
             short_term_memories = memory_manager.list_short_term_memories()
             long_term_memories = memory_manager.list_long_term_memories()
             
-            name_memory_found = False
-            
             for memory in short_term_memories:
                 try:
                     created_at = memory.created_at
@@ -104,21 +92,10 @@ class TimeStampedMemory:
                     
                     message_type = "human" if memory.role == "user" else "ai"
                     
-                    importance = memory.importance
-                    if self._detect_name_in_content(memory.content):
-                        importance = min(0.95, importance + 0.4)
-                        name_memory_found = True
-                        if not any(p.content == memory.content for p in self.long_term_preferences):
-                            self.long_term_preferences.append(LongTermPreference(
-                                content=f"用户名字: {memory.content}",
-                                confidence=0.9
-                            ))
-                    
                     message = TimeStampedMessage(
                         content=memory.content,
                         message_type=message_type,
-                        timestamp=created_at,
-                        importance=importance
+                        timestamp=created_at
                     )
                     self.raw_messages.append(message)
                     
@@ -127,20 +104,7 @@ class TimeStampedMemory:
                 except Exception as e:
                     logger.warning(f"加载短期记忆失败: {e}")
             
-            for memory in long_term_memories:
-                try:
-                    if "[长期记忆" in memory.content or "喜欢" in memory.content or "爱好" in memory.content:
-                        if not any(p.content == memory.content for p in self.long_term_preferences):
-                            self.long_term_preferences.append(LongTermPreference(
-                                content=memory.content,
-                                confidence=0.8
-                            ))
-                except Exception as e:
-                    logger.warning(f"加载长期记忆失败: {e}")
-            
-            logger.info(f"已加载 {len(short_term_memories)} 条短期记忆和 {len(self.long_term_preferences)} 条长期偏好")
-            if name_memory_found:
-                logger.info("检测到用户名字记忆，已添加到长期偏好")
+            logger.info(f"已加载 {len(short_term_memories)} 条短期记忆和 {len(long_term_memories)} 条长期记忆")
         
         except Exception as e:
             logger.warning(f"加载已有记忆失败: {e}")
@@ -188,13 +152,10 @@ class TimeStampedMemory:
         
         summary_content = self._generate_summary(messages_to_summarize)
         
-        contains_long_term = self._extract_long_term_preferences(messages_to_summarize)
-        
         summary = TimeStampedSummary(
             content=summary_content,
             start_time=start_time,
-            end_time=end_time,
-            contains_long_term=contains_long_term
+            end_time=end_time
         )
         self.summaries.append(summary)
         
@@ -240,29 +201,6 @@ class TimeStampedMemory:
         summary = f"对话总结：{' '.join(key_topics[:20])}"
         return summary
     
-    def _extract_long_term_preferences(self, messages: List[TimeStampedMessage]) -> bool:
-        """提取长期偏好"""
-        preference_keywords = ["喜欢", "讨厌", "爱好", "always", "never", "prefer", "hate"]
-        found_preferences = []
-        
-        for msg in messages:
-            if msg.message_type == "human":
-                content_lower = msg.content.lower()
-                for keyword in preference_keywords:
-                    if keyword in content_lower:
-                        found_preferences.append(msg.content)
-                        break
-        
-        for pref in found_preferences[:3]:
-            if not any(pref in p.content for p in self.long_term_preferences):
-                self.long_term_preferences.append(LongTermPreference(
-                    content=pref,
-                    confidence=0.7,
-                    source_conversation="自动提取"
-                ))
-        
-        return len(found_preferences) > 0
-    
     def get_context_window(self, hours: int = 2) -> List[TimeStampedMessage]:
         """获取时间窗口内的消息"""
         cutoff_time = datetime.datetime.now() - datetime.timedelta(hours=hours)
@@ -273,8 +211,6 @@ class TimeStampedMemory:
     
     def load_memory_variables(self, current_input: str) -> Dict[str, Any]:
         """加载记忆变量"""
-        long_term_prefs = [p.content for p in self.long_term_preferences]
-        
         recent_summary = ""
         if self.summaries:
             recent_summary = self.summaries[-1].content
@@ -294,7 +230,6 @@ class TimeStampedMemory:
                 history_lines.append(f"[记忆] {summary.content}")
         
         return {
-            "long_term_preferences": "\n".join(long_term_prefs) if long_term_prefs else "",
             "recent_summary": recent_summary,
             "context_window": "\n".join(history_lines),
             "history": "\n".join(history_lines),
@@ -303,30 +238,18 @@ class TimeStampedMemory:
     
     def get_system_prompt_additions(self) -> str:
         """获取系统提示词补充"""
-        additions = []
-        
-        long_term_prefs = [p.content for p in self.long_term_preferences]
-        if long_term_prefs:
-            additions.append("用户偏好:")
-            additions.extend([f"- {p}" for p in long_term_prefs[:5]])
-        
-        return "\n".join(additions) if additions else ""
+        return ""
     
     def clear(self) -> None:
         """清除所有记忆"""
         self.raw_messages.clear()
         self.summaries.clear()
-        self.long_term_preferences.clear()
         self._last_interaction_time = None
 
 
 def build_time_aware_system_prompt(base_prompt: str, memory_vars: Dict[str, Any]) -> str:
     """构建时间感知的系统提示词"""
     prompt_parts = [base_prompt]
-    
-    if memory_vars.get("long_term_preferences"):
-        prompt_parts.append("\n用户偏好:")
-        prompt_parts.append(memory_vars["long_term_preferences"])
     
     if memory_vars.get("recent_summary"):
         prompt_parts.append("\n最近的对话总结:")

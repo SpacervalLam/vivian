@@ -541,6 +541,16 @@ class MemoryManager:
                     self.auto_extractor = AutoMemoryExtractor(self, ai_manager)
                     logger.debug("自动记忆提取器初始化完成")
                     
+                    # 初始化中期记忆
+                    from core.memory.mid_term import MidTermMemory
+                    mid_term_path = os.path.join(memory_dir, "mid_term_memory.json")
+                    self.mid_term_memory = MidTermMemory(mid_term_path)
+                    logger.debug("中期记忆初始化完成")
+                    
+                    # 中期记忆相关配置
+                    self.mid_term_token_limit = self.config.get("mid_term_token_limit", 50000)
+                    self.mid_term_summary_threshold = self.config.get("mid_term_summary_threshold", 30000)
+                    
                     self.memory_blocks: List[MemoryBlock] = []
                     self._init_memory_blocks()
                     
@@ -729,19 +739,18 @@ class MemoryManager:
     def add_memory(
         self, content: str, memory_type: str = "short_term", **kwargs
     ) -> str:
-        """添加记忆"""
+        """添加记忆
+        
+        注意：短期记忆不设置importance字段（保持默认值或None）
+        只有在LLM总结/转换时才设置importance
+        """
         token_count = self._calculate_tokens(content)
         
-        importance = kwargs.get("importance", 0.5)
-        if self._detect_name_in_content(content):
-            importance = min(0.95, importance + 0.4)
-            logger.debug(f"检测到名字信息，提升重要性到 {importance}")
-        
         if memory_type == "short_term":
+            # 短期记忆不设置importance，保持默认值
             memory = ShortTermMemory(
                 content=content,
                 token_count=token_count,
-                initial_importance=importance,
                 **kwargs,
             )
             memory_id = self.short_term_store.save_memory(memory)
@@ -749,6 +758,7 @@ class MemoryManager:
             embedding = kwargs.pop("embedding", None)
             if embedding is None:
                 embedding = self.embedding.embed(content)
+            # 长期记忆的importance由调用者提供，或使用默认0.5
             importance = kwargs.pop("importance", 0.5)
             memory = LongTermMemory(
                 content=content,
@@ -1030,7 +1040,13 @@ class MemoryManager:
         ]
     
     def consolidate_sensory_to_semantic(self) -> None:
-        """整合感官记忆到语义记忆"""
+        """整合感官记忆到语义记忆
+        
+        改进后的流程：
+        1. 将整合后的记忆保存到中期记忆
+        2. 同时提取明显的永久事实到长期记忆（必须转换为陈述句）
+        3. 检查中期记忆是否超过阈值，如果超过则触发LLM总结和事实提取
+        """
         short_term_memories = self.list_short_term_memories()
         
         if not short_term_memories:
@@ -1042,7 +1058,7 @@ class MemoryManager:
         
         categorized_memories = self._categorize_memories(prioritized_memories)
         
-        all_long_term_memories = []
+        all_mid_term_summaries = []
         
         for category, memories in categorized_memories.items():
             if memories:
@@ -1051,22 +1067,271 @@ class MemoryManager:
                 summary_memory = self.compressor.compress(merged_memories)
                 
                 if summary_memory:
-                    memory_id = self.add_long_term_memory(
-                        content=summary_memory.content,
-                        importance=summary_memory.importance,
-                        tags=[category] + summary_memory.tags,
-                        source=summary_memory.source,
-                        summary=summary_memory.summary,
+                    # 将整合后的记忆保存到中期记忆
+                    session_id = self._save_to_mid_term(
+                        summary_memory.content,
+                        memories,
+                        category
                     )
-                    
-                    saved_memory = self.get_memory(memory_id, memory_type="long_term")
-                    if saved_memory:
-                        all_long_term_memories.append(saved_memory)
+                    if session_id:
+                        all_mid_term_summaries.append(summary_memory)
         
-        if all_long_term_memories:
-            self.relationship_manager.analyze_memory_relationships(
-                all_long_term_memories
+        # 检查是否有过期的重要短期记忆需要跃升到长期记忆
+        self._extract_short_term_to_long_term(short_term_memories)
+        
+        # 检查中期记忆是否超过阈值
+        self._check_mid_term_threshold()
+        
+        # 清理短期记忆
+        for memory in short_term_memories:
+            self.short_term_store.delete_memory(memory.id)
+        
+        logger.info(f"感官记忆整合完成，共整合 {len(all_mid_term_summaries)} 个会话到中期记忆")
+    
+    def _extract_short_term_to_long_term(self, memories: List[Memory]):
+        """从短期记忆中提取重要的永久事实到长期记忆
+        
+        所有长期记忆都必须经过LLM转换为陈述句格式
+        
+        注意：短期记忆不设置importance字段，因此对所有用户消息都进行LLM评估，
+        让LLM判断内容是否值得保存，并评估其重要性。
+        """
+        for memory in memories:
+            # 只提取用户的消息
+            if memory.role != "user":
+                continue
+            
+            # 使用统一的陈述句转换方法
+            # LLM会自动判断内容是否值得保存为长期记忆，并评估其重要性
+            self._add_long_term_with_conversion(
+                content=memory.content,
+                tags=["short_term_promoted"]
             )
+    
+    def _save_to_mid_term(self, summary: str, memories: list, category: str) -> str:
+        """将记忆保存到中期记忆"""
+        try:
+            # 构建页面详情列表
+            details = []
+            for mem in memories:
+                page_data = {
+                    "page_id": mem.id,
+                    "user_input": mem.content if mem.role == "user" else "",
+                    "agent_response": mem.content if mem.role != "user" else "",
+                    "importance": mem.importance,
+                    "timestamp": mem.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                }
+                details.append(page_data)
+            
+            # 添加到中期记忆会话
+            session_id = self.mid_term_memory.add_session(
+                summary=summary,
+                details=details,
+                summary_keywords=[category]
+            )
+            
+            logger.debug(f"保存到中期记忆: session_id={session_id}, summary={summary[:50]}...")
+            return session_id
+        except Exception as e:
+            logger.error(f"保存到中期记忆失败: {e}")
+            return None
+    
+    def _check_mid_term_threshold(self):
+        """检查中期记忆是否超过阈值，如果超过则触发LLM总结和事实提取"""
+        try:
+            # 计算中期记忆的token总数
+            total_tokens = 0
+            for session_id, session in self.mid_term_memory.sessions.items():
+                total_tokens += self._calculate_tokens(session.get("summary", ""))
+                for page in session.get("details", []):
+                    total_tokens += self._calculate_tokens(page.get("user_input", ""))
+                    total_tokens += self._calculate_tokens(page.get("agent_response", ""))
+            
+            logger.debug(f"中期记忆当前token数: {total_tokens}, 阈值: {self.mid_term_summary_threshold}")
+            
+            if total_tokens >= self.mid_term_summary_threshold:
+                logger.info(f"中期记忆超过阈值({total_tokens}/{self.mid_term_summary_threshold})，开始总结和事实提取")
+                self._summarize_mid_term_and_extract_facts()
+        except Exception as e:
+            logger.error(f"检查中期记忆阈值失败: {e}")
+    
+    def _convert_to_statements(self, content: str) -> List[Dict[str, Any]]:
+        """使用LLM将内容转换为第一人称陈述句格式，同时评估重要性
+        
+        Args:
+            content: 原始内容
+            
+        Returns:
+            包含陈述句和重要性的字典列表，格式：[{"content": str, "importance": float}, ...]
+        """
+        if not hasattr(self, 'ai_manager') or not self.ai_manager:
+            logger.warning("AI管理器不可用，直接返回原内容")
+            return [{"content": content, "importance": 0.5}] if content else []
+        
+        try:
+            system_prompt = """你是一个记忆转换专家。请将以下内容转换为关于用户的第一人称陈述句，并评估每条陈述的重要性。
+
+规则：
+1. 只保留描述用户长期属性、偏好、习惯、价值观的内容
+2. 忽略临时任务、一次性操作、代码、具体问题
+3. 使用第一人称"我"开头的陈述句格式
+4. 如果是问答对话，提取其中的用户陈述部分
+5. 如果原内容是用户说的话，直接提取关键信息
+6. 如果原内容是AI的回复，寻找其中描述用户特征的部分
+7. 评估重要性：
+   - 0.9-1.0：核心身份、健康信息（姓名、过敏、严重疾病）
+   - 0.7-0.8：长期偏好（职业、爱好、价值观）
+   - 0.5-0.6：一般事实和事件
+   - 0.3-0.4：临时的偏好或习惯
+   - 0.1-0.2：不太重要的信息
+8. 如果没有有意义的用户陈述，返回"无"
+
+输出格式（每条一行）：
+陈述句内容 | 重要性分数
+
+示例：
+输入："用户：我喜欢喝美式咖啡，每天早上都要喝一杯"
+输出：我喜欢喝美式咖啡 | 0.75
+
+输入："AI：了解，您是程序员，经常加班到很晚"
+输出：我是一名程序员 | 0.75
+  我经常加班到很晚 | 0.65
+
+输入："帮我写一段Python代码"
+输出：无"""
+            
+            full_prompt = f"""{system_prompt}
+
+待转换内容：
+{content}
+
+请输出转换后的陈述句及重要性（每条一行，格式：陈述句 | 重要性）："""
+            
+            response = self.ai_manager.query_short(full_prompt, use_history=False)
+            
+            if not response or response.strip() == "无":
+                logger.debug("LLM判断内容无可提取的陈述句")
+                return []
+            
+            # 解析响应
+            results = []
+            for line in response.split('\n'):
+                line = line.strip()
+                # 过滤无效内容
+                if not line or len(line) < 3 or line.startswith("```") or line.startswith("#"):
+                    continue
+                
+                # 解析"陈述句 | 重要性"格式
+                if "|" in line:
+                    parts = line.rsplit("|", 1)
+                    if len(parts) == 2:
+                        statement = parts[0].strip()
+                        try:
+                            importance = float(parts[1].strip())
+                            # 确保importance在有效范围内
+                            importance = max(0.0, min(1.0, importance))
+                        except ValueError:
+                            importance = 0.5  # 默认值
+                        
+                        if statement and len(statement) >= 3:
+                            results.append({"content": statement, "importance": importance})
+                else:
+                    # 如果没有|符号，尝试提取陈述句，使用默认importance
+                    if len(line) >= 3:
+                        results.append({"content": line, "importance": 0.5})
+            
+            logger.debug(f"LLM转换得到 {len(results)} 条陈述句及重要性")
+            return results
+            
+        except Exception as e:
+            logger.error(f"LLM转换陈述句失败: {e}")
+            return [{"content": content, "importance": 0.5}] if content else []
+    
+    def _add_long_term_with_conversion(self, content: str, importance: float = 0.7, 
+                                       tags: List[str] = None, **kwargs) -> Optional[str]:
+        """添加长期记忆，自动将内容转换为陈述句格式
+        
+        Args:
+            content: 原始内容
+            importance: 默认重要性（如果LLM未提供则使用此值）
+            tags: 标签
+            
+        Returns:
+            保存的记忆ID
+        """
+        if not content or not content.strip():
+            return None
+        
+        # 获取LLM转换的结果（包含content和importance）
+        conversion_results = self._convert_to_statements(content)
+        
+        if not conversion_results:
+            logger.debug(f"没有可保存的陈述句，内容: {content[:50]}...")
+            return None
+        
+        saved_ids = []
+        tags = tags or []
+        
+        for result in conversion_results:
+            # 现在result是字典，包含content和importance
+            statement = result["content"]
+            llm_importance = result.get("importance", importance)
+            
+            # 检查是否已存在类似记忆
+            similar = self.retrieve_memories(statement, k=1)
+            should_save = True
+            
+            if similar:
+                _, score = similar[0]
+                if score >= 0.9:
+                    logger.debug(f"跳过相似记忆: {statement[:30]}... (相似度: {score:.3f})")
+                    should_save = False
+            
+            if should_save:
+                memory_id = self.add_long_term_memory(
+                    content=statement,
+                    importance=llm_importance,  # 使用LLM评估的重要性
+                    tags=["statement"] + tags,
+                    **kwargs
+                )
+                saved_ids.append(memory_id)
+                logger.info(f"保存陈述句到长期记忆: {statement[:50]}... (importance: {llm_importance:.2f})")
+        
+        return saved_ids[0] if saved_ids else None
+    
+    def _summarize_mid_term_and_extract_facts(self):
+        """总结中期记忆并提取永久事实到长期记忆
+        
+        改进：所有长期记忆都必须转换为陈述句格式
+        """
+        if not hasattr(self, 'ai_manager') or not self.ai_manager:
+            logger.warning("AI管理器不可用，无法进行中期记忆总结")
+            return
+        
+        try:
+            # 收集所有中期记忆的内容
+            all_sessions_content = []
+            for session_id, session in self.mid_term_memory.sessions.items():
+                summary = session.get("summary", "")
+                if summary:
+                    all_sessions_content.append(summary)
+            
+            if not all_sessions_content:
+                logger.debug("没有可总结的中期记忆")
+                return
+            
+            # 使用统一的陈述句转换方法
+            # LLM会自动评估每条陈述句的重要性
+            for session_content in all_sessions_content:
+                self._add_long_term_with_conversion(
+                    content=session_content,
+                    tags=["mid_term_summary", "extracted"]
+                )
+            
+            logger.info(f"中期记忆总结完成，共处理 {len(all_sessions_content)} 个会话")
+            
+        except Exception as e:
+            logger.error(f"总结中期记忆失败: {e}")
         
         try:
             all_memories = (

@@ -290,32 +290,36 @@ class MemoryDataLoader(QThread):
             )
             self.loading_progress.emit(50)
 
-            all_long_term_preferences = []
-            if self.time_stamped_memory and hasattr(self.time_stamped_memory, "long_term_preferences"):
-                for pref in self.time_stamped_memory.long_term_preferences:
-                    memory_dict = {
-                        "id": f"pref_{pref.extracted_at.timestamp()}",
-                        "content": pref.content,
-                        "created_at": pref.extracted_at.strftime("%Y-%m-%d %H:%M:%S"),
-                        "memory_type": "长期偏好",
-                        "importance": pref.confidence,
-                        "source": "preference",
-                        "tags": ["preference"],
+            # 加载中期记忆
+            all_mid_term = []
+            if hasattr(self.memory_manager, "mid_term_memory") and self.memory_manager.mid_term_memory:
+                mid_term_sessions = getattr(self.memory_manager.mid_term_memory, "sessions", {})
+                for session_id, session in mid_term_sessions.items():
+                    mid_term_dict = {
+                        "id": session_id,
+                        "content": session.get("summary", ""),
+                        "created_at": session.get("timestamp", ""),
+                        "memory_type": "中期记忆",
+                        "importance": session.get("H_segment", 0.5),
+                        "source": "mid_term",
+                        "tags": session.get("summary_keywords", []),
                         "emotion": "",
+                        "details": session.get("details", []),
+                        "H_segment": session.get("H_segment", 0.0),
+                        "N_visit": session.get("N_visit", 0),
                     }
-                    all_long_term_preferences.append(memory_dict)
-            self.loading_progress.emit(70)
+                    all_mid_term.append(mid_term_dict)
+            self.loading_progress.emit(80)
 
-            all_memories = all_short_term + all_long_term + all_long_term_preferences
+            all_memories = all_short_term + all_mid_term + all_long_term
 
             self.loading_progress.emit(90)
 
             data = {
                 "memories": all_memories,
                 "short_term": all_short_term,
-                "mid_term": [],
+                "mid_term": all_mid_term,
                 "long_term": all_long_term,
-                "long_term_preferences": all_long_term_preferences,
             }
 
             self.data_loaded.emit(data)
@@ -697,10 +701,6 @@ class ModernMemoryWindow(QMainWindow):
 
         if "long_term" in data:
             long_term_memories = data["long_term"]
-            
-            if "long_term_preferences" in data:
-                long_term_memories = long_term_memories + data["long_term_preferences"]
-            
             self.long_term_list.update_data(long_term_memories)
             self.long_term_label.setText(f"长期: {len(long_term_memories)}")
 
