@@ -22,7 +22,7 @@ logger.remove()
 if sys.stdout is not None:
     logger.add(
         sys.stdout,
-        level="DEBUG",
+        level="INFO",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {module} | {message}",
     )
 

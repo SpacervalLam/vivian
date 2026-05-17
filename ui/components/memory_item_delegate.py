@@ -299,7 +299,7 @@ class MemoryItemDelegate(QWidget):
             i = 0
             while i < len(summary):
                 if content_lower[i:i+len(search_text_lower)] == search_text_lower:
-                    result += f"<span style='color: {COLORS['accent_pink']}; font-weight: bold;'>{summary[i:i+len(search_text_lower)]}</span>"
+                    result += f"<span style='color: {COLORS['accent_pink']};'>{summary[i:i+len(search_text_lower)]}</span>"
                     i += len(search_text_lower)
                 else:
                     result += summary[i]
@@ -382,7 +382,7 @@ class MemoryItemDelegate(QWidget):
         main_layout.addWidget(content_widget)
         main_layout.setStretchFactor(content_widget, 1)
 
-        fixed_height = 95
+        fixed_height = 100
         item.setSizeHint(QSize(0, fixed_height))
         self.memory_list.addItem(item)
         self.memory_list.setItemWidget(item, item_widget)
