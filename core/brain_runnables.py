@@ -349,6 +349,7 @@ class BrainState(BaseModel):
     expression: str = Field(default="", description="表情")
     importance_user: float = Field(default=0.3, description="用户侧重要性")
     importance_ai: float = Field(default=0.3, description="AI 侧重要性")
+    long_term_memory: str = Field(default="", description="LLM生成的长期记忆")
     
     memory_saved: bool = Field(default=False, description="记忆是否已保存")
     
@@ -687,7 +688,7 @@ class PromptBuildingRunnable(VivianRunnable[BrainState, BrainState]):
                 
                 semantic_memories = []
                 if self.memory_manager:
-                    retrieved = self.memory_manager.retrieve_memory(input.user_input, limit=8, skip_profile_extraction=False)
+                    retrieved = self.memory_manager.retrieve_memory(input.user_input, limit=16, skip_profile_extraction=False)
                     input.memory_profile = retrieved.get("profile", {})
                     semantic_memories = retrieved.get("semantic_memory", [])
                 
@@ -717,7 +718,7 @@ class PromptBuildingRunnable(VivianRunnable[BrainState, BrainState]):
                             if not content.startswith("User: "):
                                 role = "User: "
                         
-                        memory_parts.append(f"[记忆] {time_str}{role}{content}")
+                        memory_parts.append(f"{time_str}{role}{content}")
                 
                 input.memory_text = "\n".join(memory_parts)
             elif self.memory_filter:
@@ -826,7 +827,7 @@ class PromptBuildingRunnable(VivianRunnable[BrainState, BrainState]):
                     
                     if self.memory_manager:
                         task_profile = loop.run_in_executor(
-                            None, lambda: self.memory_manager.retrieve_memory(input.user_input, limit=8, skip_profile_extraction=False)
+                            None, lambda: self.memory_manager.retrieve_memory(input.user_input, limit=16, skip_profile_extraction=False)
                         )
                         tasks.append(task_profile)
                     
@@ -851,7 +852,7 @@ class PromptBuildingRunnable(VivianRunnable[BrainState, BrainState]):
                                     time_str = mem.created_at.strftime("%Y-%m-%d %H:%M") + " "
                                 except:
                                     pass
-                            memory_parts.append(f"[记忆] {time_str}{mem.content}")
+                            memory_parts.append(f"{time_str}{mem.content}")
                     
                     return "\n".join(memory_parts)
                 elif self.memory_filter:
@@ -1108,12 +1109,14 @@ class ResponseParsingRunnable(VivianRunnable[BrainState, BrainState]):
                     input.expression = first_item.get("expression", "")
                     input.importance_user = first_item.get("importance_user", 0.3)
                     input.importance_ai = first_item.get("importance_ai", 0.3)
+                    input.long_term_memory = first_item.get("long_term_memory", "")
             elif isinstance(response_json, dict) and "text" in response_json:
                 input.text = response_json.get("text", "")
                 input.motion = response_json.get("motion", "idle")
                 input.expression = response_json.get("expression", "")
                 input.importance_user = response_json.get("importance_user", 0.3)
                 input.importance_ai = response_json.get("importance_ai", 0.3)
+                input.long_term_memory = response_json.get("long_term_memory", "")
             
             if not input.tool_call_executed:
                 if isinstance(response_json, list):
@@ -1323,6 +1326,19 @@ class MemorySavingRunnable(VivianRunnable[BrainState, BrainState]):
                             )
                         )
                         logger.debug(f"[MemorySaving] 已保存AI回复{i+1}到记忆系统")
+                    
+                    # 如果LLM生成了长期记忆，保存为长期记忆
+                    if input.long_term_memory and input.long_term_memory.strip():
+                        long_term_content = input.long_term_memory.strip()
+                        await loop.run_in_executor(
+                            None,
+                            lambda content=long_term_content: self.memory_manager.add_long_term_memory(
+                                content=content,
+                                importance=0.9,
+                                source="llm_generated"
+                            )
+                        )
+                        logger.debug(f"[MemorySaving] LLM生成的长期记忆已保存: {long_term_content[:50]}...")
                     
                 except Exception as e:
                     logger.warning(f"[MemorySaving] 记忆保存失败: {e}")

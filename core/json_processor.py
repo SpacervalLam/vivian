@@ -159,6 +159,7 @@ class JSONProcessor:
             "importance_user": importance_user,
             "importance_ai": importance_ai,
             "reason": data.get("reason", "normal chat"),
+            "long_term_memory": data.get("long_term_memory", ""),
         }
 
         return result

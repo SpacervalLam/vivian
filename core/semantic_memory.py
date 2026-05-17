@@ -98,7 +98,16 @@ class SemanticMemoryStore:
     """语义记忆存储 - 基于向量相似度检索"""
     
     def __init__(self, embedding_model: Optional[BaseEmbeddingModel] = None):
-        self.embedding_model = embedding_model or SentenceTransformerEmbedding()
+        if embedding_model:
+            self.embedding_model = embedding_model
+        else:
+            try:
+                from .onnx_embedding import OnnxEmbeddingModel
+                self.embedding_model = OnnxEmbeddingModel()
+                logger.info("Using ONNX embedding model as default")
+            except ImportError:
+                self.embedding_model = SentenceTransformerEmbedding()
+                logger.info("Using SentenceTransformer embedding model as fallback")
         self.memories: Dict[str, SemanticMemoryItem] = {}
         self.embeddings: List[Tuple[str, np.ndarray]] = []  # (id, embedding)
     

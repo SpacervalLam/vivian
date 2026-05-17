@@ -22,7 +22,7 @@ logger.remove()
 if sys.stdout is not None:
     logger.add(
         sys.stdout,
-        level="INFO",
+        level="DEBUG",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {module} | {message}",
     )
 
@@ -1029,7 +1029,9 @@ class DeskpetMainWindow(QMainWindow):
 
             logger.debug("Brain 初始化完成")
         except Exception as e:
+            import traceback
             logger.error(f"Brain 初始化失败: {e}")
+            logger.error(traceback.format_exc())
             QMessageBox.warning(self, "警告", f"AI大脑初始化失败: {e}")
 
         try:

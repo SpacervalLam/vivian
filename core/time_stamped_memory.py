@@ -1,7 +1,7 @@
 """
-时间戳记忆系统
+Time-Stamped Memory System
 
-支持时间感知的记忆管理，包括时间戳、记忆总结、长期偏好等功能。
+Supports time-aware memory management, including timestamps, memory summarization, long-term preferences, and more.
 """
 
 from __future__ import annotations
@@ -15,24 +15,24 @@ from pydantic import BaseModel, Field
 
 
 class TimeStampedMessage(BaseModel):
-    """带时间戳的消息"""
-    content: str = Field(..., description="消息内容")
-    message_type: str = Field(..., description="消息类型: 'human' 或 'ai'")
-    timestamp: datetime.datetime = Field(default_factory=datetime.datetime.now, description="时间戳")
-    is_summarized: bool = Field(default=False, description="是否已总结")
-    importance: float = Field(default=0.5, description="重要性")
+    """Time-stamped message"""
+    content: str = Field(..., description="Message content")
+    message_type: str = Field(..., description="Message type: 'human' or 'ai'")
+    timestamp: datetime.datetime = Field(default_factory=datetime.datetime.now, description="Timestamp")
+    is_summarized: bool = Field(default=False, description="Whether summarized")
+    importance: float = Field(default=0.5, description="Importance")
 
 
-class TimeStampedSummary(BaseModel):
-    """记忆总结"""
-    content: str = Field(..., description="总结内容")
-    start_time: datetime.datetime = Field(..., description="开始时间")
-    end_time: datetime.datetime = Field(..., description="结束时间")
+class MemorySummary(BaseModel):
+    """Memory summary"""
+    content: str = Field(..., description="Summary content")
+    start_time: datetime.datetime = Field(..., description="Start time")
+    end_time: datetime.datetime = Field(..., description="End time")
 
 
 class TimeStampedMemory:
     """
-    时间戳记忆系统
+    Time-stamped memory system
     """
     
     def __init__(
@@ -57,7 +57,7 @@ class TimeStampedMemory:
             self._load_existing_memories(self.memory_manager)
     
     def _detect_name_in_content(self, content: str) -> bool:
-        """检测名字信息"""
+        """Detect name information"""
         name_patterns = [
             r'我是[\u4e00-\u9fa5]{2,}(?!谁|什么|哪|几)',
             r'我的名字是[\u4e00-\u9fa5]{2,}',
@@ -79,7 +79,7 @@ class TimeStampedMemory:
         return False
 
     def _load_existing_memories(self, memory_manager):
-        """加载已有记忆"""
+        """Load existing memories"""
         try:
             short_term_memories = memory_manager.list_short_term_memories()
             long_term_memories = memory_manager.list_long_term_memories()
@@ -102,12 +102,10 @@ class TimeStampedMemory:
                     if self._last_interaction_time is None or created_at > self._last_interaction_time:
                         self._last_interaction_time = created_at
                 except Exception as e:
-                    logger.warning(f"加载短期记忆失败: {e}")
-            
-            logger.info(f"已加载 {len(short_term_memories)} 条短期记忆和 {len(long_term_memories)} 条长期记忆")
-        
+                    logger.warning(f"Failed to load short-term memory: {e}")
+            logger.info(f"Loaded {len(short_term_memories)} short-term memories and {len(long_term_memories)} long-term memories")
         except Exception as e:
-            logger.warning(f"加载已有记忆失败: {e}")
+            logger.warning(f"Failed to load existing memory: {e}")
     
     def add_message(
         self,
@@ -116,7 +114,7 @@ class TimeStampedMemory:
         importance: float = 0.5,
         timestamp: Optional[datetime.datetime] = None
     ) -> None:
-        """添加消息"""
+        """Add message"""
         if timestamp is None:
             timestamp = datetime.datetime.now()
         
@@ -133,7 +131,7 @@ class TimeStampedMemory:
             self._summarize_old_messages()
     
     def _summarize_old_messages(self) -> None:
-        """总结旧消息"""
+        """Summarize old messages"""
         if len(self.raw_messages) < self.summary_threshold:
             return
         
@@ -159,38 +157,38 @@ class TimeStampedMemory:
         )
         self.summaries.append(summary)
         
-        logger.debug(f"[TimeStampedMemory] 总结 {len(messages_to_summarize)} 条消息到: {summary_content[:100]}...")
+        logger.debug(f"[TimeStampedMemory] Summarized {len(messages_to_summarize)} messages to: {summary_content[:100]}...")
     
     def _generate_summary(self, messages: List[TimeStampedMessage]) -> str:
-        """生成总结"""
+        """Generate summary"""
         if not messages:
             return ""
         
         dialogue_parts = []
         for msg in messages:
-            role = "用户" if msg.message_type == "human" else "AI"
+            role = "User" if msg.message_type == "human" else "AI"
             dialogue_parts.append(f"{role}: {msg.content}")
         
         dialogue_text = "\n".join(dialogue_parts)
         
         if self.llm:
             try:
-                prompt = f"""请总结以下对话的核心内容（用中文回复）：
+                prompt = f"""Please summarize the core content of the following conversation (reply in English):
 
 {dialogue_text}
 
-总结要求：
-1. 提取关键信息和重要结论
-2. 保留重要的用户偏好和习惯
-3. 简洁明了，不超过100字"""
+Summary Requirements:
+1. Extract key information and important conclusions
+2. Preserve important user preferences and habits
+3. Be concise and clear, within 100 words"""
                 
                 from core.ai_manager import ai_manager
                 if ai_manager:
                     response = ai_manager.query_short(prompt, use_history=False)
-                    if response and not response.startswith("嗯"):
+                    if response and not response.startswith("Hmm"):
                         return response.strip()
             except Exception as e:
-                logger.warning(f"LLM总结失败: {e}")
+                logger.warning(f"LLM summary failed: {e}")
         
         key_topics = []
         for msg in messages:
@@ -198,11 +196,11 @@ class TimeStampedMemory:
                 words = msg.content.split()
                 key_topics.extend(words[:10])
         
-        summary = f"对话总结：{' '.join(key_topics[:20])}"
+        summary = f"Conversation Summary: {' '.join(key_topics[:20])}"
         return summary
     
     def get_context_window(self, hours: int = 2) -> List[TimeStampedMessage]:
-        """获取时间窗口内的消息"""
+        """Get messages within time window"""
         cutoff_time = datetime.datetime.now() - datetime.timedelta(hours=hours)
         return [
             msg for msg in self.raw_messages
@@ -210,7 +208,7 @@ class TimeStampedMemory:
         ]
     
     def load_memory_variables(self, current_input: str) -> Dict[str, Any]:
-        """加载记忆变量"""
+        """Load memory variables"""
         recent_summary = ""
         if self.summaries:
             recent_summary = self.summaries[-1].content
@@ -219,15 +217,15 @@ class TimeStampedMemory:
         
         history_lines = []
         if recent_summary:
-            history_lines.append(f"[历史总结] {recent_summary}")
+            history_lines.append(f"[History Summary] {recent_summary}")
         
         for msg in context_window[-10:]:
-            role = "用户" if msg.message_type == "human" else "AI"
+            role = "User" if msg.message_type == "human" else "AI"
             history_lines.append(f"{role}: {msg.content}")
         
         for summary in self.summaries[-3:]:
             if summary.content not in history_lines:
-                history_lines.append(f"[记忆] {summary.content}")
+                history_lines.append(f"{summary.content}")
         
         return {
             "recent_summary": recent_summary,
@@ -237,22 +235,26 @@ class TimeStampedMemory:
         }
     
     def get_system_prompt_additions(self) -> str:
-        """获取系统提示词补充"""
+        """Get system prompt additions"""
         return ""
     
     def clear(self) -> None:
-        """清除所有记忆"""
+        """Clear all memories"""
         self.raw_messages.clear()
         self.summaries.clear()
         self._last_interaction_time = None
 
 
 def build_time_aware_system_prompt(base_prompt: str, memory_vars: Dict[str, Any]) -> str:
-    """构建时间感知的系统提示词"""
+    """Build time-aware system prompt"""
     prompt_parts = [base_prompt]
     
     if memory_vars.get("recent_summary"):
-        prompt_parts.append("\n最近的对话总结:")
+        prompt_parts.append("\nRecent conversation summary:")
         prompt_parts.append(memory_vars["recent_summary"])
+    
+    if memory_vars.get("context_window"):
+        prompt_parts.append("\nDialogue history:")
+        prompt_parts.append(memory_vars["context_window"])
     
     return "\n".join(prompt_parts)

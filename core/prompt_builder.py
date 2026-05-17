@@ -1,6 +1,6 @@
-"""提示词构建器
+"""Prompt Builder
 
-模块化提示词系统，支持身份、上下文、记忆、工具等功能。
+Modular prompt system supporting identity, context, memory, tools, and other features.
 """
 
 from datetime import datetime
@@ -27,7 +27,7 @@ from core.prompt_modules import (
 
 class BasePromptTemplate:
     """
-    基础提示模板类，支持模板部分变量和可重用 prompt 设计
+    Base prompt template class, supporting partial variables and reusable prompt design
     """
 
     input_variables: List[str] = []
@@ -35,51 +35,51 @@ class BasePromptTemplate:
     partial_variables: Dict[str, Any] = {}
 
     def __init__(self, **kwargs):
-        """初始化模板"""
+        """Initialize template"""
         self.partial_variables = kwargs
 
     def format(self, **kwargs) -> str:
         """
-        格式化模板
+        Format template
 
         Args:
-            **kwargs: 变量值
+            **kwargs: Variable values
 
         Returns:
-            格式化后的字符串
+            Formatted string
         """
-        # 合并部分变量和传入变量
+        # Merge partial variables with passed variables
         all_vars = {**self.partial_variables, **kwargs}
 
-        # 验证必需变量
+        # Validate required variables
         missing_vars = set(self.input_variables) - set(all_vars.keys())
         if missing_vars:
             raise ValueError(f"Missing required input variables: {missing_vars}")
 
-        # 格式化模板
+        # Format template
         return self._format_template(all_vars)
 
     def _format_template(self, variables: Dict[str, Any]) -> str:
         """
-        子类实现具体的格式化逻辑
+        Subclass implements specific formatting logic
         """
         raise NotImplementedError
 
     def partial(self, **kwargs) -> 'BasePromptTemplate':
-        """创建部分填充的模板副本
+        """Create a partially filled template copy
         
         Args:
-            **kwargs: 要预填充的变量
+            **kwargs: Variables to pre-fill
         
         Returns:
-            新的模板实例
+            New template instance
         """
         new_partial = {**self.partial_variables, **kwargs}
         return self.__class__(**new_partial)
 
 
 class PromptBuilder(BasePromptTemplate):
-    """提示词构建器 - 集成三级记忆体系，继承BasePromptTemplate"""
+    """Prompt Builder - Integrates three-level memory system, inherits BasePromptTemplate"""
 
     input_variables = ["user_input"]
     optional_variables = ["memory_text", "history_text", "tools_text", "context_text"]
@@ -132,8 +132,8 @@ You are Vivian, a cute and playful desktop pet.
 or
 {"tool": "tool_name", "arguments": {"param": "value"}}
 
-**表情使用**：默认不设置表情(expression="")，只在有明确情绪需要时才设置表情。
-**可用表情**：shy, angry, cry, panic, eye_roll, umbrella_close
+**Expression Usage**: Do not set expression by default (expression=""), only set when clearly needed for emotion.
+**Available Expressions**: shy, angry, cry, panic, eye_roll, umbrella_close
 **importance_user**: 0.9-1.0=identity, 0.7-0.8=preferences, 0.4-0.6=events, 0.2-0.3=context"""
 
     EXPRESSION_BLOCK = """## Expression Guide
@@ -144,36 +144,36 @@ shy=shy/happy(praise, intimate conversation), angry=angry(ignored), cry=sad(symp
     FEW_SHOT_BLOCK = """## Examples
 
 **Example 1 - Tool Call**
-User: "帮我打开微信"
+User: "Open WeChat for me"
 Response: {{"tool": "open_application", "arguments": {{"app_path": "C:\\Program Files\\Tencent\\WeChat\\WeChat.exe"}}}}
 
 **Example 2 - First Meeting (Call by name once)**
-User: "你好，我叫张三"
-Response: {{"text": "你好张三，很高兴认识你！我是你的AI助手Vivian~", "motion": "idle", "expression": "shy", "importance_user": 0.95}}
+User: "Hello, my name is Zhang San"
+Response: {{"text": "Hello Zhang San, nice to meet you! I'm your AI assistant Vivian~", "motion": "idle", "expression": "shy", "importance_user": 0.95}}
 
 **Example 3 - Continue Conversation (No name)**
-User: "今天有什么好看的电影推荐吗？"
-Response: {{"text": "最近《流浪地球2》口碑不错，是一部硬核科幻片哦~", "motion": "idle", "expression": "", "importance_user": 0.5}}
+User: "What good movies are showing lately?"
+Response: {{"text": "The Wandering Earth 2 has great reviews recently, it's a hard sci-fi film~", "motion": "idle", "expression": "", "importance_user": 0.5}}
 
 **Example 4 - Follow up (No name)**
-User: "听起来不错，剧情讲的是什么？"
-Response: {{"text": "故事发生在2075年，人类为了逃离太阳系开启了流浪地球计划...", "motion": "idle", "expression": "", "importance_user": 0.5}}
+User: "Sounds good, what's the plot about?"
+Response: {{"text": "Set in 2075, humanity begins the Wandering Earth project to escape the solar system...", "motion": "idle", "expression": "", "importance_user": 0.5}}
 
 **Example 5 - Express Gratitude (Call by name)**
-User: "好的，谢谢你的推荐"
-Response: {{"text": "不客气张三，祝你观影愉快！", "motion": "idle", "expression": "shy", "importance_user": 0.5}}
+User: "Okay, thank you for the recommendation"
+Response: {{"text": "You're welcome Zhang San, enjoy the movie!", "motion": "idle", "expression": "shy", "importance_user": 0.5}}
 
 **Example 6 - Casual Chat**
-User: "今天工作好累，压力好大"
-Response: {{"text": "哎呀~辛苦了辛苦了，要不要让我来给你解解闷？", "motion": "idle", "expression": "shy", "importance_user": 0.5}}
+User: "I'm so tired from work today, feeling stressed"
+Response: {{"text": "Oh~ You've worked hard, want me to cheer you up?", "motion": "idle", "expression": "shy", "importance_user": 0.5}}
 
 **Example 7 - Ask Time**
-User: "现在几点了"
-Response: {{"text": "现在是晚上8点45分哦，还在忙吗", "motion": "idle", "expression": "", "importance_user": 0.3}}
+User: "What time is it now"
+Response: {{"text": "It's 8:45 PM now, still busy?", "motion": "idle", "expression": "", "importance_user": 0.3}}
 
 **Example 8 - Greeting**
-User: "你好"
-Response: {{"text": "嗨~想我了吗？", "motion": "idle", "expression": "shy", "importance_user": 0.2}}"""
+User: "Hello"
+Response: {{"text": "Hi~ Miss me?", "motion": "idle", "expression": "shy", "importance_user": 0.2}}"""
 
     OUTPUT_BLOCK = """## Output
 - Language: Same as user
@@ -206,17 +206,17 @@ Tool Call: {{"tool": "tool_name", "arguments": {{"param": "value"}}}}
 Chat: {{"text": "reply (50 chars)", "motion": "idle", "expression": "smile"}}
 
 ## Examples
-"打开微信" → {{"tool": "open_application", "arguments": {{"app_path": "C:\\Program Files\\Tencent\\WeChat\\WeChat.exe"}}}}
-"你好" → {{"text": "嗨~😊", "motion": "idle", "expression": "smile"}}
+"Open WeChat" → {{"tool": "open_application", "arguments": {{"app_path": "C:\\Program Files\\Tencent\\WeChat\\WeChat.exe"}}}}
+"Hello" → {{"text": "Hi~😊", "motion": "idle", "expression": "smile"}}
 
 ## Important
 1. Same language as user
 2. JSON only, no markdown
-3. Tool parameters must be complete paths or English commands, not Chinese
+3. Tool parameters must be complete paths or English commands
 4. All fields required"""
 
     def __init__(self, memory_manager=None, dialogue_manager=None, environment_manager=None, tool_call_manager=None, tool_system=None, **kwargs):
-        """初始化提示构建器"""
+        """Initialize prompt builder"""
         super().__init__(**kwargs)
         self.memory_manager = memory_manager
         self.dialogue_manager = dialogue_manager
@@ -224,7 +224,7 @@ Chat: {{"text": "reply (50 chars)", "motion": "idle", "expression": "smile"}}
         self.tool_call_manager = tool_call_manager
         self.tool_system = tool_system
         
-        # 初始化模块化提示词构建器
+        # Initialize modular prompt builder
         self._use_modular = kwargs.get("use_modular", True)
         if self._use_modular:
             self._modular_builder = ModularPromptBuilder(
@@ -237,7 +237,7 @@ Chat: {{"text": "reply (50 chars)", "motion": "idle", "expression": "smile"}}
         self._hybrid_retriever = None
 
     def _format_template(self, variables: Dict[str, Any]) -> str:
-        """格式化完整的提示词模板"""
+        """Format complete prompt template"""
         user_input = variables["user_input"]
         memory_text = variables.get("memory_text", "")
         history_text = variables.get("history_text", "")
@@ -252,7 +252,7 @@ Chat: {{"text": "reply (50 chars)", "motion": "idle", "expression": "smile"}}
         return self._format_prompt(user_input, ctx, memory_text, history_text, tools_text)
 
     def _build_memory_context(self, user_input: str) -> str:
-        """构建记忆上下文"""
+        """Build memory context"""
         try:
             if self.memory_manager and hasattr(self.memory_manager, "build_memory_context"):
                 return self.memory_manager.build_memory_context(
@@ -261,7 +261,7 @@ Chat: {{"text": "reply (50 chars)", "motion": "idle", "expression": "smile"}}
                     k=8,
                 )
 
-            # 向后兼容旧逻辑
+            # Backward compatibility with old logic
             retrieved = self.memory_manager.retrieve_memory(
                 user_input, limit=3, skip_profile_extraction=True
             )
@@ -272,14 +272,14 @@ Chat: {{"text": "reply (50 chars)", "motion": "idle", "expression": "smile"}}
             return "No relevant memories found."
 
     def build_prompt(self, user_input: str, proactive_hints: Optional[List[str]] = None) -> str:
-        """构建完整的提示词
+        """Build complete prompt
         
         Args:
-            user_input: 用户输入文本
-            proactive_hints: 渐进式话题提示列表
+            user_input: User input text
+            proactive_hints: Progressive topic hints list
         
         Returns:
-            完整的提示词字符串
+            Complete prompt string
         """
         if self._use_modular and hasattr(self, "_modular_builder"):
             return self._modular_builder.build_prompt(user_input)
@@ -298,35 +298,35 @@ Chat: {{"text": "reply (50 chars)", "motion": "idle", "expression": "smile"}}
         return self._format_prompt(user_input, ctx, memory_text, history_text, tools_text)
     
     def add_prompt_module(self, module: PromptModule, position: Optional[int] = None):
-        """动态添加提示词模块"""
+        """Dynamically add prompt module"""
         if hasattr(self, "_modular_builder"):
             self._modular_builder.add_module(module, position)
     
     def remove_prompt_module(self, name: str):
-        """动态移除提示词模块"""
+        """Dynamically remove prompt module"""
         if hasattr(self, "_modular_builder"):
             self._modular_builder.remove_module(name)
     
     def replace_prompt_module(self, name: str, new_module: PromptModule):
-        """动态替换提示词模块"""
+        """Dynamically replace prompt module"""
         if hasattr(self, "_modular_builder"):
             self._modular_builder.replace_module(name, new_module)
     
     def get_active_modules(self) -> List[str]:
-        """获取当前激活的模块列表"""
+        """Get list of active modules"""
         if hasattr(self, "_modular_builder"):
             return [m.name for m in self._modular_builder.modules]
         return []
 
     def build_prompt_from_parts(self, user_input: str, prompt_parts: Dict[str, Any]) -> str:
-        """从预构建的部分构建提示词
+        """Build prompt from pre-built parts
         
         Args:
-            user_input: 用户输入文本
-            prompt_parts: 预构建的提示词部分
+            user_input: User input text
+            prompt_parts: Pre-built prompt parts
         
         Returns:
-            完整的提示词字符串
+            Complete prompt string
         """
         variables = {"user_input": user_input}
 
@@ -342,7 +342,7 @@ Chat: {{"text": "reply (50 chars)", "motion": "idle", "expression": "smile"}}
     def _format_prompt(self, user_input: str, ctx: Dict[str, str], memory_text: str, 
                       history_text: str, tools_text: str) -> str:
         """
-        内部方法：格式化提示词模板
+        Internal method: Format prompt template
         """
         prompt = f"""# NEW SESSION RULES (HIGHEST PRIORITY - VIOLATION IS A SERIOUS ERROR!)
 1. When user starts a new session (more than 1 hour since last conversation, or user sends greetings like "Good morning", "Good evening", "Hello"):
@@ -389,7 +389,7 @@ You are Vivian, a cute and playful desktop pet.
 
 1. NEVER forcefully continue an already ended topic. NEVER force new topics after user says "got it", "understand", "ok", etc.
 2. When user sends the following, topic is ended or user doesn't want to continue. You MUST only respond with **1-3 words + 1 emoji max**, NO long sentences, NO new questions:
-   - Single/short responses: 嗯, 哦, 好, 行, ok, 收到, 知道了, 没问题, 好的, 好哒, 嗯嗯, 哦哦, 对呀, 是的, 哈哈
+   - Single/short responses: En, Oh, Okay, Alright, ok, Got it, Understood, No problem, Yes, Mm-hmm
    - Pure emojis: 😆, 😊, 👍, 🥰, o(*￣▽￣*)o
 3. When user sends 2+ consecutive short responses, stop replying completely and wait for user to initiate new topic.
 4. Only generate normal full response when user asks questions, shares new info, or actively starts new topics.
@@ -403,11 +403,11 @@ You are Vivian, a cute and playful desktop pet.
 
 ## Wrong vs Correct Examples
 ❌ Wrong:
-User: 嗯~ o(*￣▽￣*)o
+User: Mm~ o(*￣▽￣*)o
 Assistant: Look at you so happy 😆 Are you already thinking about when to order taro ball milk tea?
 
 ✅ Correct:
-User: 嗯~ o(*￣▽￣*)o
+User: Mm~ o(*￣▽￣*)o
 Assistant: 😆
 
 ❌ Wrong:
@@ -416,7 +416,7 @@ Assistant: Hehe you're awesome~ Next time when you want taro ball milk tea I'll 
 
 ✅ Correct:
 User: ok, I remember
-Assistant: 好哒😘
+Assistant: Got it 😘
 
 ## Context
 - Time: {ctx.get('time', '')}
@@ -438,6 +438,15 @@ You MUST output ONLY valid JSON, no other text before or after.
 Format 1 (Chat): {{"text": "reply", "motion": "idle", "expression": "", "importance_user": 0.5}}
 Format 2 (Single Tool Call): {{"tool": "tool_name", "arguments": {{"param": "value"}}}}
 Format 3 (Multiple): [{{"tool": "tool1", "arguments": {{...}}}}, {{"tool": "tool2", "arguments": {{...}}}}]
+
+**Important**: Only include "long_term_memory" field when user explicitly shares basic personal information:
+- Name (e.g., "User's name is Zhang San")
+- Gender (e.g., "User is male/female")
+- Birthday (e.g., "User's birthday is January 1st")
+- Location/City (e.g., "User lives in Beijing")
+- Occupation (e.g., "User is a programmer")
+
+**Do NOT use for**: preferences, hobbies, opinions, casual chat, or temporary information. Only use when user directly tells you these basic facts.
 
 ## Deskpet Self-Control
 You can generate JSON with control_actions field to control the deskpet's own state:
@@ -471,7 +480,7 @@ User says "Go to sleep" -> {{"control_actions": [{{"action": "set_sleep", "param
         return prompt
 
     def _get_user_input_section(self, user_input: str, proactive_block: str = "") -> str:
-        """构建用户输入部分"""
+        """Build user input section"""
         user_section = f"""# User Input
 {user_input}"""
         if proactive_block:
@@ -479,21 +488,21 @@ User says "Go to sleep" -> {{"control_actions": [{{"action": "set_sleep", "param
         return user_section
 
     def _build_context(self) -> Dict[str, str]:
-        """构建环境上下文"""
+        """Build environment context"""
         return {
             "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S %A"),
-            "active_app": self._get_active_window() if self.environment_manager else "未知",
+            "active_app": self._get_active_window() if self.environment_manager else "Unknown",
             "season": self._get_current_season(),
         }
 
     def _format_retrieved_memory(self, retrieved: Dict) -> str:
-        """格式化检索到的记忆"""
+        """Format retrieved memory"""
         memory_parts = []
 
         if retrieved.get("profile"):
             p = retrieved["profile"]
             profile_items = []
-            if p.get('name') and p['name'] != '主人':
+            if p.get('name') and p['name'] != 'Master':
                 profile_items.append(f"- Name: {p['name']}")
             if p.get('preferences'):
                 profile_items.append(f"- Preferences: {', '.join(p['preferences'])}")
@@ -514,13 +523,13 @@ User says "Go to sleep" -> {{"control_actions": [{{"action": "set_sleep", "param
         return "\n\n".join(memory_parts) if memory_parts else "No relevant memories found."
 
     def _format_history(self, history_msgs: List[Dict]) -> str:
-        """格式化对话历史"""
+        """Format dialogue history"""
         if not history_msgs:
             return "No dialogue history."
         return "\n".join([f"- {m['role']}: {m['content']}" for m in history_msgs])
 
     def _build_tools_text(self) -> str:
-        """构建工具文本"""
+        """Build tools text"""
         try:
             if hasattr(self, 'tool_system') and self.tool_system:
                 tools = self.tool_system.get_anthropic_tools()
@@ -556,23 +565,23 @@ open_application, close_application, open_folder, open_url, get_system_info, tak
 **Tool Call Format**: {{"tool": "tool_name", "arguments": {{"param": "value"}}}}"""
 
     def _get_active_window(self) -> str:
-        """获取当前活动窗口"""
+        """Get current active window"""
         return self.environment_manager.get_active_window()
 
     def _get_current_season(self) -> str:
-        """获取当前季节"""
+        """Get current season"""
         month = datetime.now().month
         if month in [3, 4, 5]:
-            return "春季"
+            return "Spring"
         elif month in [6, 7, 8]:
-            return "夏季"
+            return "Summer"
         elif month in [9, 10, 11]:
-            return "秋季"
+            return "Autumn"
         else:
-            return "冬季"
+            return "Winter"
     
     def build_system_prompt(self) -> str:
-        """构建基础系统提示词，不包含用户输入"""
+        """Build base system prompt without user input"""
         ctx = self._build_context()
         tools_text = self._build_tools_text()
         

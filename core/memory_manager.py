@@ -183,6 +183,14 @@ class MemorySelector:
         bm25_results = self._get_bm25_results(query, candidates, k=k * 3)
         logger.debug(f"[select_memories] BM25 results: {len(bm25_results)}")
         
+        name_keywords = ["中文名", "英文名", "名字", "叫我", "我是", "称呼我"]
+        if any(keyword in query for keyword in name_keywords):
+            name_memories = self._find_name_memories(candidates)
+            logger.debug(f"[select_memories] Found {len(name_memories)} name memories for name-related query")
+            for mem in name_memories:
+                if mem not in [sem_mem for sem_mem, _ in semantic_results]:
+                    semantic_results.append((mem, 0.8))
+        
         scores: Dict[str, float] = {}
         
         for sem_mem, score in semantic_results:
@@ -196,11 +204,21 @@ class MemorySelector:
         
         ranked: List[Tuple[Memory, float]] = []
         now = datetime.datetime.now()
+        
+        name_keywords = ["我是", "我的名字是", "叫我", "名字是", "称呼我", "英文名", "中文名"]
+        
         for memory in candidates:
             base = scores.get(memory.id, 0.0)
             importance_factor = memory.importance * 0.1
             age_hours = (now - memory.created_at).total_seconds() / 3600.0
-            recency_factor = 1.0 / (1.0 + age_hours / 24.0)
+            
+            is_name_memory = any(keyword in (memory.content or "") for keyword in name_keywords)
+            
+            if is_name_memory:
+                recency_factor = 1.0
+            else:
+                recency_factor = 1.0 / (1.0 + age_hours / 24.0)
+            
             final_score = base + importance_factor + recency_factor * 0.1
             ranked.append((memory, final_score))
         
@@ -235,6 +253,21 @@ class MemorySelector:
             logger.debug(f"  - {score:.4f}: {mem.content[:50]}...")
         
         return selected
+    
+    def _find_name_memories(self, candidates: List[Memory]) -> List[Memory]:
+        """查找包含名字信息的记忆"""
+        name_keywords = ["我是", "我的名字是", "叫我", "名字是", "称呼我", "英文名", "中文名"]
+        name_memories = []
+        seen_content = set()
+        
+        for mem in candidates:
+            content = mem.content or ""
+            if any(keyword in content for keyword in name_keywords):
+                if content not in seen_content:
+                    seen_content.add(content)
+                    name_memories.append(mem)
+        
+        return name_memories
     
     def _sync_semantic_store(self, memories: List[Memory]):
         """同步到语义存储"""
@@ -422,6 +455,7 @@ class MemoryManager:
                     )
                     
                     from core.memory.embedding import SentenceTransformerEmbedding
+                    from core.onnx_embedding import OnnxEmbeddingModel
                     
                     from utils.config_manager import config_manager
                     user_embedding_path = config_manager.get("memory.embedding_model_path", "")
@@ -436,15 +470,20 @@ class MemoryManager:
                             embedding_model_path = default_path
                             logger.debug(f"使用默认嵌入模型路径: {embedding_model_path}")
                     
-                    if embedding_model_path:
-                        self.embedding = SentenceTransformerEmbedding(
-                            custom_model_path=embedding_model_path,
-                            user_data_dir=user_data_dir,
-                        )
-                    else:
-                        self.embedding = SentenceTransformerEmbedding(
-                            user_data_dir=user_data_dir
-                        )
+                    try:
+                        self.embedding = OnnxEmbeddingModel(model_path=embedding_model_path)
+                        logger.debug("使用ONNX嵌入模型")
+                    except Exception as e:
+                        logger.warning(f"ONNX嵌入模型初始化失败，使用SentenceTransformer: {e}")
+                        if embedding_model_path:
+                            self.embedding = SentenceTransformerEmbedding(
+                                custom_model_path=embedding_model_path,
+                                user_data_dir=user_data_dir,
+                            )
+                        else:
+                            self.embedding = SentenceTransformerEmbedding(
+                                user_data_dir=user_data_dir
+                            )
                     
                     from core.memory.chroma_storage import ChromaMemoryStore
                     

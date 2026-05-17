@@ -1,12 +1,17 @@
 import asyncio
 import gzip
 import json
+import logging
 import os
 import random
 import time
 from collections import deque
 from typing import Any, Dict, Optional, Tuple, Type, List
 from functools import lru_cache, wraps
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 import httpx
 from openai import OpenAI, AsyncOpenAI
