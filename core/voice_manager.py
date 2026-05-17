@@ -10,6 +10,7 @@
 """
 
 import base64
+import gzip
 import json
 import re
 import sys
@@ -19,7 +20,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import requests
+import httpx
 
 try:
     import pyaudio
@@ -69,6 +70,9 @@ from utils.config_manager import config_manager
 class VoiceManager:
     """语音管理器 - 整合ASR语音识别和TTS语音合成"""
 
+    _tts_client = None
+    _asr_client = None
+
     def __init__(self):
         """初始化语音管理器"""
         self._load_config()
@@ -76,6 +80,54 @@ class VoiceManager:
         self._tts_engine = None
         self._asr_client = None
         logger.debug("VoiceManager 初始化完成")
+
+    @classmethod
+    def _get_tts_client(cls) -> httpx.Client:
+        """获取TTS专用HTTP客户端（HTTP/2支持）"""
+        if cls._tts_client is None:
+            cls._tts_client = httpx.Client(
+                http2=True,
+                timeout=60.0,
+                limits=httpx.Limits(
+                    max_connections=10,
+                    max_keepalive_connections=5,
+                    keepalive_expiry=30.0
+                ),
+                headers={
+                    'Accept-Encoding': 'gzip, deflate'
+                },
+                retries=httpx.Retry(
+                    total=3,
+                    backoff_factor=0.5,
+                    status_codes=[429, 500, 502, 503, 504]
+                )
+            )
+            logger.debug("TTS HTTP/2客户端已创建")
+        return cls._tts_client
+
+    @classmethod
+    def _get_asr_client(cls) -> httpx.Client:
+        """获取ASR专用HTTP客户端（HTTP/2支持）"""
+        if cls._asr_client is None:
+            cls._asr_client = httpx.Client(
+                http2=True,
+                timeout=60.0,
+                limits=httpx.Limits(
+                    max_connections=5,
+                    max_keepalive_connections=3,
+                    keepalive_expiry=30.0
+                ),
+                headers={
+                    'Accept-Encoding': 'gzip, deflate'
+                },
+                retries=httpx.Retry(
+                    total=2,
+                    backoff_factor=0.3,
+                    status_codes=[429, 500, 502, 503, 504]
+                )
+            )
+            logger.debug("ASR HTTP/2客户端已创建")
+        return cls._asr_client
 
     def _load_config(self):
         """加载配置"""
@@ -379,7 +431,11 @@ class VoiceManager:
             return None
 
         try:
-            headers = {"accept": "*/*", "Content-Type": "application/json"}
+            headers = {
+                "accept": "*/*", 
+                "Content-Type": "application/json",
+                "Accept-Encoding": "gzip, deflate"
+            }
             payload = {
                 "text": text,
                 "chunk_length": 200,
@@ -396,11 +452,11 @@ class VoiceManager:
                 "temperature": 0.8,
             }
 
-            response = requests.post(
+            client = self._get_tts_client()
+            response = client.post(
                 self.remote_tts_url, 
                 headers=headers, 
-                json=payload, 
-                timeout=60
+                json=payload
             )
 
             if response.status_code == 200:

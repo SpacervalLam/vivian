@@ -12,7 +12,7 @@ import win32gui
 from loguru import logger
 from PyQt5.QtCore import (QEasingCurve, QPoint, QPropertyAnimation, QRect, Qt,
                           QTimer, pyqtSignal)
-from PyQt5.QtGui import QColor, QCursor, QFont, QIcon
+from PyQt5.QtGui import QBrush, QColor, QCursor, QFont, QIcon, QPainter, QPen, QConicalGradient
 from PyQt5.QtWidgets import (QAction, QApplication, QGraphicsDropShadowEffect,
                              QInputDialog, QLabel, QMainWindow, QMenu,
                              QMessageBox, QPushButton, QSystemTrayIcon, 
@@ -536,6 +536,63 @@ class AnimeBubble(QMainWindow):
         super().mousePressEvent(event)
 
 
+class LoadingSpinner(QWidget):
+    """旋转加载图标组件（可内置到父窗口）"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFixedSize(32, 32)
+        self.move(10, 10)
+        
+        self._rotation = 0
+        self._animation_timer = QTimer(self)
+        self._animation_timer.setInterval(50)
+        self._animation_timer.timeout.connect(self._update_rotation)
+    
+    def start(self):
+        """开始旋转动画"""
+        self._animation_timer.start()
+        self.show()
+    
+    def stop(self):
+        """停止旋转动画"""
+        self._animation_timer.stop()
+        self.hide()
+    
+    def _update_rotation(self):
+        """更新旋转角度"""
+        self._rotation += 10
+        if self._rotation >= 360:
+            self._rotation = 0
+        self.update()
+    
+    def paintEvent(self, event):
+        """绘制旋转加载图标"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        center = QPoint(self.width() // 2, self.height() // 2)
+        radius = min(self.width(), self.height()) // 2 - 3
+        
+        painter.setPen(QPen(QColor(155, 89, 182, 50), 2))
+        painter.drawEllipse(center, radius, radius)
+        
+        painter.save()
+        painter.translate(center.x(), center.y())
+        painter.rotate(self._rotation)
+        
+        gradient = QConicalGradient(0, 0, 0)
+        gradient.setColorAt(0, QColor(155, 89, 182))
+        gradient.setColorAt(0.7, QColor(155, 89, 182))
+        gradient.setColorAt(1, QColor(155, 89, 182, 0))
+        
+        painter.setPen(QPen(QBrush(gradient), 2, Qt.SolidLine, Qt.RoundCap))
+        painter.drawArc(-radius, -radius, radius * 2, radius * 2, 0, 270 * 16)
+        
+        painter.restore()
+
+
 class DeskpetMainWindow(QMainWindow):
     ai_response_received = pyqtSignal(object)
     
@@ -572,10 +629,9 @@ class DeskpetMainWindow(QMainWindow):
         self.sig_speech_stopped.connect(self._ui_on_speech_stopped)
         self.sig_stream_event.connect(self._ui_on_stream_event)
         
-        # 思考状态计时器
+        # 思考状态计时器（备用）
         self._thinking_animation_timer = QTimer(self)
         self._thinking_animation_timer.setInterval(500)  # 每500ms更新一次
-        self._thinking_animation_timer.timeout.connect(self._update_thinking_animation)
         self._thinking_dots_count = 0
 
     def _init_ui_update_optimization(self):
@@ -2329,71 +2385,31 @@ class DeskpetMainWindow(QMainWindow):
         if is_thinking:
             logger.info("[_on_thinking_state_changed] 开始思考")
             self._thinking_dots_count = 0
-            self._thinking_animation_timer.start()
-            # 显示思考气泡
             self._show_thinking_bubble()
+            self._thinking_animation_timer.start()
         else:
             logger.info("[_on_thinking_state_changed] 结束思考")
             self._thinking_animation_timer.stop()
-            # 关闭思考气泡
             self._close_thinking_bubble()
     
     def _show_thinking_bubble(self):
-        """显示思考动画（大字体紫色显示）"""
-        if hasattr(self, "_thinking_label") and self._thinking_label:
-            self._thinking_label.close()
+        """显示思考动画（旋转加载图标，内置到主窗口）"""
+        if hasattr(self, "_thinking_spinner") and self._thinking_spinner:
+            self._thinking_spinner.stop()
+            if self._thinking_spinner.parent() is not None:
+                self._thinking_spinner.setParent(None)
         
-        from PyQt5.QtWidgets import QLabel
-        from PyQt5.QtGui import QFont, QColor
-        from PyQt5.QtCore import Qt
-        
-        self._thinking_label = QLabel(self)
-        thinking_text = self._get_thinking_animation_text()
-        self._thinking_label.setText(thinking_text)
-        
-        # 设置大字体和紫色
-        font = QFont()
-        font.setPointSize(24)
-        font.setBold(True)
-        self._thinking_label.setFont(font)
-        self._thinking_label.setStyleSheet("color: purple;")
-        
-        # 设置位置（宠物右侧）
-        pet_rect = self.frameGeometry()
-        label_x = pet_rect.x() + pet_rect.width() + 10
-        label_y = pet_rect.y() + 20
-        
-        self._thinking_label.move(label_x, label_y)
-        self._thinking_label.show()
+        self._thinking_spinner = LoadingSpinner(self)
+        self._thinking_spinner.raise_()
+        self._thinking_spinner.start()
     
     def _close_thinking_bubble(self):
         """关闭思考动画"""
-        if hasattr(self, "_thinking_label") and self._thinking_label:
-            self._thinking_label.close()
-            self._thinking_label = None
-    
-    def _get_thinking_animation_text(self):
-        """获取思考动画文本（跳动的点效果）"""
-        # 动画帧：点在6个位置之间跳动，最后一帧是6个点
-        frames = [
-            "·.....",
-            ".·....",
-            "..·...",
-            "...·..",
-            "....·.",
-            ".....·",
-            "......"
-        ]
-        return frames[self._thinking_dots_count % len(frames)]
-    
-    def _update_thinking_animation(self):
-        """更新思考动画（跳动的点）"""
-        self._thinking_dots_count += 1
-        
-        if hasattr(self, "_thinking_label") and self._thinking_label:
-            thinking_text = self._get_thinking_animation_text()
-            self._thinking_label.setText(thinking_text)
-            self._thinking_label.adjustSize()
+        if hasattr(self, "_thinking_spinner") and self._thinking_spinner:
+            self._thinking_spinner.stop()
+            self._thinking_spinner.setParent(None)
+            self._thinking_spinner.deleteLater()
+            self._thinking_spinner = None
 
     def _toggle_sound(self):
         enabled = self.sound_toggle_action.isChecked()

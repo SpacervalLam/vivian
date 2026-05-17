@@ -124,8 +124,6 @@ dist/
 # ================
 # Third-party tools
 # ================
-open-interpreter/
-memoryos-agent/
 ClaudeCode-main/
 langchain-master/
 

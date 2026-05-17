@@ -1,4 +1,5 @@
 import asyncio
+import gzip
 import json
 import os
 import random
@@ -7,11 +8,7 @@ from collections import deque
 from typing import Any, Dict, Optional, Tuple, Type, List
 from functools import lru_cache, wraps
 
-import aiohttp
-from aiohttp import ClientTimeout, TCPConnector
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+import httpx
 from openai import OpenAI, AsyncOpenAI
 from dotenv import load_dotenv
 import threading
@@ -19,46 +16,59 @@ import hashlib
 from loguru import logger
 from utils.config_manager import config_manager
 
-# 全局HTTP会话池
-_http_session_pool = None
 _async_http_session_pool = None
+_httpx_client = None
+_httpx_async_client = None
 
 def get_http_session(max_retries=3, pool_size=10):
-    """获取全局HTTP会话"""
-    global _http_session_pool
-    if _http_session_pool is None:
-        session = requests.Session()
-        retry_strategy = Retry(
-            total=max_retries,
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["HEAD", "GET", "POST"]
-        )
-        adapter = HTTPAdapter(
-            max_retries=retry_strategy,
-            pool_connections=pool_size,
-            pool_maxsize=pool_size
-        )
-        session.mount("https://", adapter)
-        session.mount("http://", adapter)
-        _http_session_pool = session
-    return _http_session_pool
+    """获取全局HTTP会话（使用httpx）"""
+    return get_httpx_client(http2=True)
 
 async def get_async_http_session(max_retries=3, pool_size=10):
-    """获取全局异步HTTP会话，复用连接池"""
-    global _async_http_session_pool
-    if _async_http_session_pool is None:
-        connector = TCPConnector(
-            limit=pool_size,
-            limit_per_host=pool_size,
-            keepalive_timeout=30
+    """获取全局异步HTTP会话（使用httpx HTTP/2）"""
+    return await get_httpx_async_client(http2=True)
+
+def get_httpx_client(http2: bool = True):
+    """获取全局HTTP/2客户端（同步）"""
+    global _httpx_client
+    if _httpx_client is None:
+        _httpx_client = httpx.Client(
+            http2=http2,
+            timeout=60.0,
+            limits=httpx.Limits(
+                max_connections=10,
+                max_keepalive_connections=5,
+                keepalive_expiry=30.0
+            ),
+            headers={'Accept-Encoding': 'gzip, deflate'},
+            retries=httpx.Retry(
+                total=3,
+                backoff_factor=1,
+                status_codes=[429, 500, 502, 503, 504]
+            )
         )
-        timeout = ClientTimeout(total=60)
-        _async_http_session_pool = aiohttp.ClientSession(
-            connector=connector,
-            timeout=timeout
+    return _httpx_client
+
+async def get_httpx_async_client(http2: bool = True):
+    """获取全局HTTP/2客户端（异步）"""
+    global _httpx_async_client
+    if _httpx_async_client is None:
+        _httpx_async_client = httpx.AsyncClient(
+            http2=http2,
+            timeout=60.0,
+            limits=httpx.Limits(
+                max_connections=10,
+                max_keepalive_connections=5,
+                keepalive_expiry=30.0
+            ),
+            headers={'Accept-Encoding': 'gzip, deflate'},
+            retries=httpx.Retry(
+                total=3,
+                backoff_factor=1,
+                status_codes=[429, 500, 502, 503, 504]
+            )
         )
-    return _async_http_session_pool
+    return _httpx_async_client
 
 def timed_lru_cache(seconds: int, maxsize: int = 128):
     """带超时的LRU缓存装饰器"""
@@ -75,6 +85,119 @@ def timed_lru_cache(seconds: int, maxsize: int = 128):
             return func(*args, **kwargs)
         return wrapped_func
     return wrapper_cache
+
+
+class ConcurrentRequestManager:
+    """并发请求管理器，用于批量并行执行多个API请求"""
+    
+    def __init__(self, max_concurrent: int = 5):
+        self._max_concurrent = max_concurrent
+        self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._results = {}
+        self._errors = {}
+    
+    async def execute_request(self, request_id: str, coro):
+        """执行单个请求，带信号量控制并发数"""
+        async with self._semaphore:
+            try:
+                result = await coro
+                self._results[request_id] = result
+                return result
+            except Exception as e:
+                self._errors[request_id] = e
+                raise
+    
+    async def execute_batch(self, requests: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        批量执行多个请求
+        
+        Args:
+            requests: 字典，key为请求ID，value为协程对象
+        
+        Returns:
+            结果字典，包含成功和失败的结果
+        """
+        tasks = [
+            self.execute_request(req_id, coro)
+            for req_id, coro in requests.items()
+        ]
+        
+        await asyncio.gather(*tasks, return_exceptions=True)
+        
+        return {
+            "results": self._results.copy(),
+            "errors": self._errors.copy()
+        }
+    
+    def get_result(self, request_id: str) -> Optional[Any]:
+        """获取指定请求的结果"""
+        return self._results.get(request_id)
+    
+    def get_error(self, request_id: str) -> Optional[Exception]:
+        """获取指定请求的错误"""
+        return self._errors.get(request_id)
+    
+    def clear(self):
+        """清空结果"""
+        self._results.clear()
+        self._errors.clear()
+
+
+class RequestPriority:
+    """请求优先级枚举"""
+    HIGH = 0
+    NORMAL = 1
+    LOW = 2
+
+
+class PriorityRequestQueue:
+    """优先级请求队列，支持按优先级处理请求"""
+    
+    def __init__(self, max_workers: int = 3):
+        self._queues = {
+            RequestPriority.HIGH: asyncio.Queue(),
+            RequestPriority.NORMAL: asyncio.Queue(),
+            RequestPriority.LOW: asyncio.Queue()
+        }
+        self._max_workers = max_workers
+        self._running = False
+        self._workers = []
+    
+    async def add_request(self, priority: int, request_id: str, coro):
+        """添加请求到队列"""
+        await self._queues[priority].put((request_id, coro))
+    
+    async def start(self):
+        """启动工作线程"""
+        if self._running:
+            return
+        self._running = True
+        for _ in range(self._max_workers):
+            worker = asyncio.create_task(self._worker())
+            self._workers.append(worker)
+    
+    async def stop(self):
+        """停止工作线程"""
+        self._running = False
+        for worker in self._workers:
+            worker.cancel()
+        self._workers.clear()
+    
+    async def _worker(self):
+        """工作线程，按优先级处理请求"""
+        while self._running:
+            for priority in [RequestPriority.HIGH, RequestPriority.NORMAL, RequestPriority.LOW]:
+                try:
+                    if not self._queues[priority].empty():
+                        request_id, coro = await self._queues[priority].get()
+                        try:
+                            await coro
+                        except Exception as e:
+                            logger.error(f"请求 {request_id} 执行失败: {e}")
+                        break
+                except asyncio.CancelledError:
+                    return
+            await asyncio.sleep(0.01)
 
 
 class SmartRequestBuilder:
@@ -666,6 +789,25 @@ class AIManager:
         self._cache_file_path = self._get_cache_file_path()
         # 缓存锁：保护 _request_cache 的并发访问
         self._cache_lock = threading.Lock()
+        
+        # 智能缓存配置
+        self._cache_timeouts = {
+            'quick_query': 60,       # 快速查询短缓存
+            'normal': 300,           # 普通查询中等缓存
+            'long_term': 3600,       # 长期知识长缓存
+            'factual': 7200,         # 事实性知识更长缓存
+            'creative': 60,          # 创意内容短缓存
+        }
+        self._cache_stats = {
+            'hits': 0,
+            'misses': 0,
+            'evictions': 0
+        }
+        self._request_type_patterns = {
+            'quick_query': ['是什么', '什么是', '多少', '几个', '什么时候'],
+            'factual': ['定义', '原理', '历史', '规则', '定律'],
+            'creative': ['写', '创作', '编', '想象', '设计'],
+        }
 
         self._load_disk_cache()
         self._init_provider()
@@ -798,6 +940,115 @@ class AIManager:
         """在更新缓存后保存到磁盘"""
         if self.config.get("enable_disk_cache") and self._cache_file_path:
             self._save_disk_cache()
+
+    def _detect_request_type(self, prompt: str) -> str:
+        """检测请求类型，用于智能缓存策略"""
+        prompt_lower = prompt.lower()
+        
+        for req_type, patterns in self._request_type_patterns.items():
+            for pattern in patterns:
+                if pattern in prompt_lower:
+                    return req_type
+        
+        if len(prompt) < 50:
+            return 'quick_query'
+        elif len(prompt) > 500:
+            return 'long_term'
+        
+        return 'normal'
+
+    def _get_smart_cache_timeout(self, prompt: str) -> int:
+        """根据请求类型获取智能缓存超时时间"""
+        req_type = self._detect_request_type(prompt)
+        return self._cache_timeouts.get(req_type, self._cache_timeout)
+
+    def _get_cached_response_smart(self, prompt: str) -> Optional[str]:
+        """智能获取缓存响应，带统计"""
+        key = self._get_cache_key(prompt)
+        cached = self._request_cache.get(key)
+        
+        if cached:
+            req_type = self._detect_request_type(prompt)
+            timeout = self._cache_timeouts.get(req_type, self._cache_timeout)
+            
+            if time.time() - cached['timestamp'] < timeout:
+                self._cache_stats['hits'] += 1
+                logger.debug(f"[AIManager] 缓存命中，类型: {req_type}")
+                return cached['response']
+            else:
+                del self._request_cache[key]
+                self._cache_stats['evictions'] += 1
+        
+        self._cache_stats['misses'] += 1
+        return None
+
+    def _cache_response_smart(self, prompt: str, response: str):
+        """智能缓存响应，根据请求类型设置不同超时"""
+        key = self._get_cache_key(prompt)
+        req_type = self._detect_request_type(prompt)
+        timeout = self._cache_timeouts.get(req_type, self._cache_timeout)
+        
+        self._request_cache[key] = {
+            'response': response,
+            'timestamp': time.time(),
+            'type': req_type
+        }
+        
+        if len(self._request_cache) > 100:
+            self._evict_old_cache()
+        
+        self._persist_cache()
+        logger.debug(f"[AIManager] 已缓存响应，类型: {req_type}, 超时: {timeout}秒")
+
+    def _evict_old_cache(self):
+        """清理旧缓存条目"""
+        if not self._request_cache:
+            return
+        
+        current_time = time.time()
+        keys_to_remove = []
+        
+        for key, value in self._request_cache.items():
+            req_type = value.get('type', 'normal')
+            timeout = self._cache_timeouts.get(req_type, self._cache_timeout)
+            
+            if current_time - value['timestamp'] > timeout:
+                keys_to_remove.append(key)
+        
+        for key in keys_to_remove:
+            del self._request_cache[key]
+            self._cache_stats['evictions'] += 1
+        
+        if keys_to_remove:
+            logger.debug(f"[AIManager] 清理了 {len(keys_to_remove)} 个过期缓存")
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """获取缓存统计信息"""
+        total = self._cache_stats['hits'] + self._cache_stats['misses']
+        hit_rate = self._cache_stats['hits'] / total if total > 0 else 0
+        
+        return {
+            'hits': self._cache_stats['hits'],
+            'misses': self._cache_stats['misses'],
+            'evictions': self._cache_stats['evictions'],
+            'hit_rate': f"{hit_rate:.2%}",
+            'cache_size': len(self._request_cache)
+        }
+
+    async def warmup_cache(self, common_queries: List[str]):
+        """预热缓存，提前加载常用查询"""
+        logger.info(f"[AIManager] 开始预热缓存，共 {len(common_queries)} 个查询")
+        
+        for query in common_queries:
+            try:
+                if not self._get_cached_response_smart(query):
+                    response = await self.query_short_async(query, use_history=False)
+                    self._cache_response_smart(query, response)
+                    logger.debug(f"[AIManager] 预热缓存: {query[:30]}...")
+            except Exception as e:
+                logger.warning(f"[AIManager] 预热缓存失败: {e}")
+        
+        logger.info(f"[AIManager] 缓存预热完成，统计: {self.get_cache_stats()}")
 
     async def query_short_async(
         self,
