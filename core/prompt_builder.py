@@ -429,7 +429,7 @@ Assistant: Got it 😘
 {history_text if history_text else 'No history yet'}
 
 ## Tools
-{tools_text if tools_text else 'Available: open_application, close_application, open_folder, open_url, get_system_info, take_screenshot, calculate, get_time, search_files, copy_file, move_file, delete_file, set_wallpaper, minimize_window, maximize_window, close_window, get_clipboard_text, set_clipboard_text, get_running_processes, create_file, list_files, get_active_window, execute_code, set_timer, cancel_timer, list_timers'}
+{tools_text if tools_text else 'Available: open_application, close_application, open_folder, open_url, get_system_info, take_screenshot, calculate, get_time, search_files, copy_file, move_file, delete_file, set_wallpaper, wallpaper_engine, list_wallpapers, minimize_window, maximize_window, close_window, get_clipboard_text, set_clipboard_text, get_running_processes, create_file, list_files, get_active_window, execute_code, set_timer, cancel_timer, list_timers'}
 Tool Call Format: {{"tool": "tool_name", "arguments": {{"param": "value"}}}}
 
 ## Output Format (IMPORTANT: JSON Only)
@@ -438,6 +438,13 @@ You MUST output ONLY valid JSON, no other text before or after.
 Format 1 (Chat): {{"text": "reply", "motion": "idle", "expression": "", "importance_user": 0.5}}
 Format 2 (Single Tool Call): {{"tool": "tool_name", "arguments": {{"param": "value"}}}}
 Format 3 (Multiple): [{{"tool": "tool1", "arguments": {{...}}}}, {{"tool": "tool2", "arguments": {{...}}}}]
+Format 4 (Chat + Tool Call): [{{"text": "reply", "motion": "idle", "expression": ""}}, {{"tool": "tool_name", "arguments": {{"param": "value"}}}}]
+
+**Alternative Format**: You can also use "text reply first, then tool call JSON on next line" format if that's easier:
+```
+Your natural language reply to user
+{{"tool": "tool_name", "arguments": {{"param": "value"}}}}
+```
 
 **Important**: Only include "long_term_memory" field when user explicitly shares basic personal information:
 - Name (e.g., "User's name is Zhang San")
@@ -555,7 +562,7 @@ User says "Go to sleep" -> {{"control_actions": [{{"action": "set_sleep", "param
         
         return """## Available Tools
 
-open_application, close_application, open_folder, open_url, get_system_info, take_screenshot, calculate, get_time, search_files, copy_file, move_file, delete_file, set_wallpaper, minimize_window, maximize_window, close_window, get_clipboard_text, set_clipboard_text, get_running_processes, create_file, list_files, get_active_window, execute_code, set_timer, cancel_timer, list_timers
+open_application, close_application, open_folder, open_url, get_system_info, take_screenshot, calculate, get_time, search_files, copy_file, move_file, delete_file, set_wallpaper, wallpaper_engine, list_wallpapers, minimize_window, maximize_window, close_window, get_clipboard_text, set_clipboard_text, get_running_processes, create_file, list_files, get_active_window, execute_code, set_timer, cancel_timer, list_timers
 
 **Tool Usage Rules**:
 - Use tools when user requests PC operations

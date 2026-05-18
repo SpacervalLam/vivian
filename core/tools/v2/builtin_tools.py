@@ -1,7 +1,7 @@
 """
-示例工具 - 使用新架构实现的核心工具
+Built-in Tools - Core tools implemented using the new architecture
 
-展示如何使用工具系统V2创建工具。
+Demonstrates how to create tools using Tool System V2.
 """
 
 from __future__ import annotations
@@ -30,14 +30,14 @@ from . import (
 
 
 class FileReadInput(BaseModel):
-    """文件读取输入"""
-    file_path: str = Field(description="要读取的文件的绝对路径")
-    offset: Optional[int] = Field(default=None, description="起始行号（从1开始）")
-    limit: Optional[int] = Field(default=None, description="读取的行数")
+    """File read input"""
+    file_path: str = Field(description="Absolute path of the file to read")
+    offset: Optional[int] = Field(default=None, description="Starting line number (1-based)")
+    limit: Optional[int] = Field(default=None, description="Number of lines to read")
 
 
 class FileReadOutput(BaseModel):
-    """文件读取输出"""
+    """File read output"""
     file_path: str
     content: str
     total_lines: int
@@ -46,41 +46,41 @@ class FileReadOutput(BaseModel):
 
 
 class FileEditInput(BaseModel):
-    """文件编辑输入"""
-    file_path: str = Field(description="要编辑的文件的绝对路径")
-    old_str: str = Field(description="要替换的文本")
-    new_str: str = Field(description="替换后的文本")
+    """File edit input"""
+    file_path: str = Field(description="Absolute path of the file to edit")
+    old_str: str = Field(description="Text to replace")
+    new_str: str = Field(description="Replacement text")
 
 
 class FileEditOutput(BaseModel):
-    """文件编辑输出"""
+    """File edit output"""
     file_path: str
     success: bool
     message: str
 
 
 class FileWriteInput(BaseModel):
-    """文件写入输入"""
-    file_path: str = Field(description="要写入的文件的绝对路径")
-    content: str = Field(description="要写入的内容")
+    """File write input"""
+    file_path: str = Field(description="Absolute path of the file to write")
+    content: str = Field(description="Content to write")
 
 
 class FileWriteOutput(BaseModel):
-    """文件写入输出"""
+    """File write output"""
     file_path: str
     success: bool
     bytes_written: int
 
 
 class BashInput(BaseModel):
-    """Bash命令输入"""
-    command: str = Field(description="要执行的命令")
-    timeout: Optional[int] = Field(default=30000, description="超时时间（毫秒）")
-    cwd: Optional[str] = Field(default=None, description="工作目录")
+    """Bash command input"""
+    command: str = Field(description="Command to execute")
+    timeout: Optional[int] = Field(default=30000, description="Timeout in milliseconds")
+    cwd: Optional[str] = Field(default=None, description="Working directory")
 
 
 class BashOutput(BaseModel):
-    """Bash命令输出"""
+    """Bash command output"""
     command: str
     stdout: str
     stderr: str
@@ -89,13 +89,13 @@ class BashOutput(BaseModel):
 
 
 class GlobInput(BaseModel):
-    """Glob搜索输入"""
-    pattern: str = Field(description="Glob模式")
-    path: Optional[str] = Field(default=".", description="搜索路径")
+    """Glob search input"""
+    pattern: str = Field(description="Glob pattern")
+    path: Optional[str] = Field(default=".", description="Search path")
 
 
 class GlobOutput(BaseModel):
-    """Glob搜索输出"""
+    """Glob search output"""
     pattern: str
     path: str
     files: List[str]
@@ -104,7 +104,7 @@ class GlobOutput(BaseModel):
 
 class OpenApplicationInput(BaseModel):
     """打开应用输入"""
-    app_path: str = Field(description="应用程序路径或名称")
+    app_path: str = Field(description="Application path or name")
 
 
 class OpenApplicationOutput(BaseModel):
@@ -116,9 +116,9 @@ class OpenApplicationOutput(BaseModel):
 
 class SearchFilesInput(BaseModel):
     """搜索文件输入"""
-    directory: str = Field(description="搜索目录")
-    pattern: str = Field(description="文件名模式")
-    max_results: Optional[int] = Field(default=20, description="最大结果数")
+    directory: str = Field(description="Search directory")
+    pattern: str = Field(description="File name pattern")
+    max_results: Optional[int] = Field(default=20, description="Maximum number of results")
 
 
 class SearchFilesOutput(BaseModel):
@@ -174,7 +174,7 @@ def create_file_read_tool() -> Tool:
 
     return build_tool(
         name="read_file",
-        description="读取文件内容。支持指定行范围读取大文件。",
+        description="Read file contents. Supports reading large files with specified line range.",
         input_schema=FileReadInput,
         output_schema=FileReadOutput,
         call=read_file,
@@ -227,7 +227,7 @@ def create_file_edit_tool() -> Tool:
 
     return build_tool(
         name="edit_file",
-        description="编辑文件内容。使用精确匹配替换指定文本。",
+        description="Edit file content. Use exact matching to replace specified text.",
         input_schema=FileEditInput,
         output_schema=FileEditOutput,
         call=edit_file,
@@ -269,7 +269,7 @@ def create_file_write_tool() -> Tool:
 
     return build_tool(
         name="write_file",
-        description="写入文件内容。如果文件不存在则创建，如果存在则覆盖。",
+        description="Write file content. If file doesn't exist, create it. If it exists, overwrite it.",
         input_schema=FileWriteInput,
         output_schema=FileWriteOutput,
         call=write_file,
@@ -329,7 +329,7 @@ def create_bash_tool() -> Tool:
 
     return build_tool(
         name="bash",
-        description="执行Bash命令。支持设置超时和工作目录。",
+        description="Execute Bash commands. Supports setting timeout and working directory.",
         input_schema=BashInput,
         output_schema=BashOutput,
         call=run_bash,
@@ -482,7 +482,7 @@ def get_all_builtin_tools() -> List[Tool]:
 
 class CloseApplicationInput(BaseModel):
     """关闭应用输入"""
-    process_name: str = Field(description="进程名称，如 notepad.exe")
+    process_name: str = Field(description="Process name, e.g., notepad.exe")
 
 
 class CloseApplicationOutput(BaseModel):
@@ -652,7 +652,7 @@ def create_open_url_tool() -> Tool:
 
 class SetWallpaperInput(BaseModel):
     """设置壁纸输入"""
-    image_path: str = Field(description="图片文件的完整路径")
+    image_path: Optional[str] = Field(default=None, description="图片文件的完整路径（可选，不提供则自动随机选择）")
 
 
 class SetWallpaperOutput(BaseModel):
@@ -671,11 +671,37 @@ def create_set_wallpaper_tool() -> Tool:
     ) -> ToolResult:
         image_path = args.image_path
 
+        if not image_path:
+            import random
+            wallpaper_dirs = [
+                os.path.expanduser(r"~\Pictures"),
+                os.path.expanduser(r"~\Pictures\Wallpapers"),
+                r"C:\Users\Public\Pictures",
+                r"C:\Windows\Web\Wallpaper",
+            ]
+            
+            all_wallpapers = []
+            for wallpaper_dir in wallpaper_dirs:
+                if os.path.exists(wallpaper_dir):
+                    for root, _, files in os.walk(wallpaper_dir):
+                        for file in files:
+                            if file.lower().endswith((".jpg", ".jpeg", ".png", ".bmp")):
+                                all_wallpapers.append(os.path.join(root, file))
+            
+            if not all_wallpapers:
+                return ToolResult(data={
+                    "image_path": "",
+                    "success": False,
+                    "message": "未找到壁纸图片，请提供图片路径或在 Pictures 文件夹中放置壁纸图片",
+                })
+            
+            image_path = random.choice(all_wallpapers)
+
         if not os.path.exists(image_path):
             return ToolResult(data={
                 "image_path": image_path,
                 "success": False,
-                "message": "图片文件不存在",
+                "message": f"图片文件不存在: {image_path}",
             })
 
         try:
@@ -701,7 +727,7 @@ def create_set_wallpaper_tool() -> Tool:
             output = SetWallpaperOutput(
                 image_path=image_path,
                 success=True,
-                message="壁纸已设置",
+                message=f"壁纸已设置: {os.path.basename(image_path)}",
             )
 
             return ToolResult(data=output.model_dump())
@@ -716,12 +742,285 @@ def create_set_wallpaper_tool() -> Tool:
 
     return build_tool(
         name="set_wallpaper",
-        description="设置桌面壁纸。",
+        description="设置桌面壁纸。如果不提供图片路径，会自动从系统壁纸文件夹中随机选择一张。",
         input_schema=SetWallpaperInput,
         output_schema=SetWallpaperOutput,
         call=set_wallpaper,
-        search_hint="set wallpaper, change desktop background",
+        search_hint="set wallpaper, change desktop background, random wallpaper",
         user_facing_name=lambda input_data=None: "Set Wallpaper",
+    )
+
+
+class WallpaperEngineInput(BaseModel):
+    """Wallpaper Engine 命令输入"""
+    action: str = Field(description="操作类型：open（打开壁纸）、pause（暂停）、play（恢复）、stop（停止）、mute（静音）、unmute（取消静音）、next（下一张）")
+    wallpaper_path: Optional[str] = Field(default=None, description="壁纸文件路径（仅 open 操作需要）")
+    monitor: Optional[int] = Field(default=0, description="显示器索引（从0开始，默认0）")
+
+
+class WallpaperEngineOutput(BaseModel):
+    """Wallpaper Engine 命令输出"""
+    action: str
+    success: bool
+    message: str
+
+
+def create_wallpaper_engine_tool() -> Tool:
+    """创建 Wallpaper Engine 命令行工具"""
+
+    async def wallpaper_engine(
+        args: WallpaperEngineInput,
+        context: ToolUseContext,
+    ) -> ToolResult:
+        action = args.action.lower()
+        wallpaper_path = args.wallpaper_path
+        monitor = args.monitor
+
+        wallpaper_engine_paths = [
+            r"C:\Program Files (x86)\Steam\steamapps\common\wallpaper_engine\wallpaper32.exe",
+            r"C:\Program Files (x86)\Steam\steamapps\common\wallpaper_engine\wallpaper64.exe",
+            r"D:\Program Files (x86)\Steam\steamapps\common\wallpaper_engine\wallpaper32.exe",
+            r"D:\Program Files (x86)\Steam\steamapps\common\wallpaper_engine\wallpaper64.exe",
+            r"E:\Program Files (x86)\Steam\steamapps\common\wallpaper_engine\wallpaper64.exe",
+            r"F:\Program Files (x86)\Steam\steamapps\common\wallpaper_engine\wallpaper64.exe",
+        ]
+
+        exe_path = None
+        for path in wallpaper_engine_paths:
+            if os.path.exists(path):
+                exe_path = path
+                break
+
+        if not exe_path:
+            try:
+                import winreg
+                for hkey in [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]:
+                    try:
+                        registry_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+                        key = winreg.OpenKey(hkey, registry_path)
+                        i = 0
+                        while True:
+                            try:
+                                subkey_name = winreg.EnumKey(key, i)
+                                if "wallpaper" in subkey_name.lower():
+                                    subkey = winreg.OpenKey(key, subkey_name)
+                                    try:
+                                        install_path = winreg.QueryValueEx(subkey, "InstallLocation")[0]
+                                        if install_path:
+                                            possible_exe = os.path.join(install_path, "wallpaper64.exe")
+                                            if os.path.exists(possible_exe):
+                                                exe_path = possible_exe
+                                            possible_exe = os.path.join(install_path, "wallpaper32.exe")
+                                            if os.path.exists(possible_exe) and not exe_path:
+                                                exe_path = possible_exe
+                                    except:
+                                        pass
+                                    winreg.CloseKey(subkey)
+                                i += 1
+                            except WindowsError:
+                                break
+                        winreg.CloseKey(key)
+                        if exe_path:
+                            break
+                    except:
+                        continue
+            except Exception as e:
+                logger.debug(f"Registry lookup failed: {e}")
+
+        if not exe_path:
+            try:
+                import psutil
+                for proc in psutil.process_iter(['name', 'exe']):
+                    try:
+                        if proc.name().lower() in ['wallpaper32.exe', 'wallpaper64.exe']:
+                            exe_path = proc.exe()
+                            break
+                    except:
+                        pass
+            except Exception as e:
+                logger.debug(f"Process lookup failed: {e}")
+
+        if not exe_path:
+            return ToolResult(data={
+                "action": action,
+                "success": False,
+                "message": "Wallpaper Engine not found. Please install it first from Steam.",
+            })
+
+        try:
+            import subprocess
+
+            cmd = [exe_path, "-control"]
+            
+            if action == "open":
+                if not wallpaper_path:
+                    return ToolResult(data={
+                        "action": action,
+                        "success": False,
+                        "message": "open requires wallpaper_path parameter",
+                    })
+                if not os.path.exists(wallpaper_path):
+                    return ToolResult(data={
+                        "action": action,
+                        "success": False,
+                        "message": f"Wallpaper file not found: {wallpaper_path}",
+                    })
+                cmd.extend(["openWallpaper", "-file", wallpaper_path, "-monitor", str(monitor)])
+            elif action == "pause":
+                cmd.append("pause")
+            elif action == "play":
+                cmd.append("play")
+            elif action == "stop":
+                cmd.append("stop")
+            elif action == "mute":
+                cmd.append("mute")
+            elif action == "unmute":
+                cmd.append("unmute")
+            elif action == "next":
+                cmd.append("nextWallpaper")
+            else:
+                return ToolResult(data={
+                    "action": action,
+                    "success": False,
+                    "message": f"Unsupported action: {action}",
+                })
+
+            # Execute command - Wallpaper Engine must be running first
+            subprocess.Popen(cmd)
+
+            output = WallpaperEngineOutput(
+                action=action,
+                success=True,
+                message=f"Wallpaper Engine {action} command sent. Note: Wallpaper Engine must be running first.",
+            )
+
+            return ToolResult(data=output.model_dump())
+
+        except Exception as e:
+            logger.error(f"Wallpaper Engine operation failed: {e}")
+            return ToolResult(data={
+                "action": action,
+                "success": False,
+                "message": str(e),
+            })
+
+    return build_tool(
+        name="wallpaper_engine",
+        description="Control Wallpaper Engine with command line. Supports: open (with wallpaper_path), pause, play (resume), stop, mute, unmute, next. Note: Wallpaper Engine must be running first.",
+        input_schema=WallpaperEngineInput,
+        output_schema=WallpaperEngineOutput,
+        call=wallpaper_engine,
+        search_hint="wallpaper engine, dynamic wallpaper, open wallpaper",
+        user_facing_name=lambda input_data=None: "Wallpaper Engine",
+    )
+
+
+class ListWallpapersOutput(BaseModel):
+    """列出壁纸输出"""
+    success: bool
+    message: str
+    wallpapers: List[Dict[str, str]] = Field(default_factory=list, description="壁纸列表，包含id、name、path字段")
+
+
+def create_list_wallpapers_tool() -> Tool:
+    """创建列出壁纸工具"""
+
+    async def list_wallpapers(
+        args: dict,
+        context: ToolUseContext,
+    ) -> ToolResult:
+        wallpaper_engine_paths = [
+            r"C:\Program Files (x86)\Steam\steamapps\common\wallpaper_engine",
+            r"D:\Program Files (x86)\Steam\steamapps\common\wallpaper_engine",
+            r"E:\Program Files (x86)\Steam\steamapps\common\wallpaper_engine",
+            r"F:\Program Files (x86)\Steam\steamapps\common\wallpaper_engine",
+        ]
+
+        we_path = None
+        for path in wallpaper_engine_paths:
+            if os.path.exists(path):
+                we_path = path
+                break
+
+        if not we_path:
+            try:
+                import psutil
+                for proc in psutil.process_iter(['name', 'exe']):
+                    try:
+                        if proc.name().lower() in ['wallpaper32.exe', 'wallpaper64.exe']:
+                            we_path = os.path.dirname(proc.exe())
+                            break
+                    except:
+                        pass
+            except:
+                pass
+
+        if not we_path:
+            return ToolResult(data={
+                "success": False,
+                "message": "未找到 Wallpaper Engine 安装路径",
+                "wallpapers": [],
+            })
+
+        workshop_path = os.path.join(os.path.dirname(os.path.dirname(we_path)), "workshop", "content", "431960")
+        
+        if not os.path.exists(workshop_path):
+            return ToolResult(data={
+                "success": False,
+                "message": f"未找到 workshop 目录: {workshop_path}",
+                "wallpapers": [],
+            })
+
+        wallpapers = []
+        for item in os.listdir(workshop_path):
+            item_path = os.path.join(workshop_path, item)
+            if os.path.isdir(item_path):
+                wallpaper_file = None
+                wallpaper_name = item
+                for root, _, files in os.walk(item_path):
+                    for file in files:
+                        if file.lower() == "project.json":
+                            wallpaper_file = os.path.join(root, file)
+                            try:
+                                import json
+                                with open(wallpaper_file, 'r', encoding='utf-8') as f:
+                                    project_data = json.load(f)
+                                    if 'title' in project_data:
+                                        wallpaper_name = project_data['title']
+                                    elif 'name' in project_data:
+                                        wallpaper_name = project_data['name']
+                            except:
+                                pass
+                            break
+                        if file.lower().endswith((".mp4", ".wmv", ".avi")) and not wallpaper_file:
+                            wallpaper_file = os.path.join(root, file)
+                            wallpaper_name = os.path.splitext(file)[0]
+                    if wallpaper_file:
+                        break
+                
+                if wallpaper_file:
+                    wallpapers.append({
+                        "id": item,
+                        "name": wallpaper_name,
+                        "path": wallpaper_file,
+                    })
+
+        wallpapers.sort(key=lambda x: x["name"])
+
+        return ToolResult(data={
+            "success": True,
+            "message": f"找到 {len(wallpapers)} 张壁纸",
+            "wallpapers": wallpapers,
+        })
+
+    return build_tool(
+        name="list_wallpapers",
+        description="列出所有 Wallpaper Engine 壁纸。返回壁纸列表，包含壁纸ID、名称和文件路径。使用此工具后，可以调用 wallpaper_engine 工具的 open 操作来更换壁纸。",
+        input_schema=None,
+        output_schema=ListWallpapersOutput,
+        call=list_wallpapers,
+        search_hint="list wallpapers, show wallpapers, wallpaper list, 壁纸列表",
+        user_facing_name=lambda input_data=None: "List Wallpapers",
     )
 
 
@@ -1683,10 +1982,10 @@ def create_web_search_tool() -> Tool:
 class GrepInput(BaseModel):
     """Grep搜索输入"""
     pattern: str = Field(description="要搜索的正则表达式或关键词")
-    path: Optional[str] = Field(default=".", description="搜索路径")
+    path: Optional[str] = Field(default=".", description="Search path")
     file_pattern: Optional[str] = Field(default=None, description="文件匹配模式，如 *.py")
     case_sensitive: Optional[bool] = Field(default=True, description="是否区分大小写")
-    max_results: Optional[int] = Field(default=100, description="最大结果数")
+    max_results: Optional[int] = Field(default=100, description="Maximum number of results")
     context_lines: Optional[int] = Field(default=0, description="结果周围显示的行数")
 
 
@@ -2179,6 +2478,8 @@ def get_all_builtin_tools() -> List[Tool]:
         create_open_folder_tool(),
         create_open_url_tool(),
         create_set_wallpaper_tool(),
+        create_wallpaper_engine_tool(),
+        create_list_wallpapers_tool(),
         create_take_screenshot_tool(),
         # 新增窗口控制工具
         create_minimize_window_tool(),

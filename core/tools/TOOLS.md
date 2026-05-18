@@ -1,39 +1,41 @@
 # Available Tools
 
-Total: 33 tools
+Total: 35 tools
 
 To view detailed description of a tool, call tool_list with tool_name parameter
 
-- read_file: 读取文件内容。支持指定行范围读取大文件。
-- edit_file: 编辑文件内容。使用精确匹配替换指定文本。
-- write_file: 写入文件内容。如果文件不存在则创建，如果存在则覆盖。
-- bash: 执行Bash命令。支持设置超时和工作目录。
-- glob: 使用Glob模式搜索文件。支持递归搜索。
-- open_application: 启动Windows应用程序。
-- search_files: 在指定目录中搜索文件。
-- close_application: 关闭一个正在运行的应用程序。
-- open_folder: 打开一个文件夹。
-- open_url: 在浏览器中打开网址。
-- set_wallpaper: 设置桌面壁纸。
-- take_screenshot: 截取当前屏幕并保存。
-- minimize_window: 最小化当前窗口。
-- maximize_window: 最大化当前窗口。
-- close_window: 关闭当前窗口。
-- get_system_info: 获取系统信息。
-- get_clipboard_text: 获取剪贴板文本内容。
-- set_clipboard_text: 设置剪贴板文本内容。
-- get_running_processes: 获取当前运行中的进程列表。
-- get_active_window: 获取当前活动窗口的标题。
-- copy_file: 复制文件。
-- move_file: 移动文件。
-- delete_file: 删除文件或文件夹。
-- create_file: 创建新文件。
-- list_files: 列出目录中的文件。
-- web_fetch: 获取网页内容。用于获取指定URL的网页内容。
-- web_search: 搜索网络内容。使用搜索引擎搜索相关信息。
-- grep: 在文件中搜索匹配的内容。支持正则表达式和上下文显示。
-- tool_search: 搜索可用的工具。根据功能描述搜索匹配的工具。
-- execute_code: 执行 Python 代码。
-- set_timer: 设置定时提醒或定时执行工具。
-- cancel_timer: 取消定时任务。
-- list_timers: 获取所有定时任务列表。
+- read_file: Read file contents. Supports reading large files with specified line range.
+- edit_file: Edit file content. Use exact matching to replace specified text.
+- write_file: Write file content. If file doesn't exist, create it. If it exists, overwrite it.
+- bash: Execute Bash commands. Supports setting timeout and working directory.
+- glob: Search files using Glob pattern. Supports recursive search.
+- open_application: Launch Windows applications.
+- search_files: Search for files in specified directory.
+- close_application: Close a running application.
+- open_folder: Open a folder.
+- open_url: Open a URL in browser.
+- set_wallpaper: Set desktop wallpaper. If no image path provided, automatically select a random wallpaper from system wallpaper folder.
+- wallpaper_engine: Control Wallpaper Engine with command line. Supports: open (with wallpaper_path), pause, play (resume), stop, mute, unmute, next. Note: Wallpaper Engine must be running first.
+- list_wallpapers: List all Wallpaper Engine wallpapers. Returns wallpaper list with wallpaper ID, name and file path. After using this tool, you can call wallpaper_engine tool with open operation to change wallpaper.
+- take_screenshot: Take a screenshot of current screen and save it.
+- minimize_window: Minimize current window.
+- maximize_window: Maximize current window.
+- close_window: Close current window.
+- get_system_info: Get system information.
+- get_clipboard_text: Get clipboard text content.
+- set_clipboard_text: Set clipboard text content.
+- get_running_processes: Get list of currently running processes.
+- get_active_window: Get title of currently active window.
+- copy_file: Copy a file.
+- move_file: Move a file.
+- delete_file: Delete a file or folder.
+- create_file: Create a new file.
+- list_files: List files in a directory.
+- web_fetch: Get web page content. Used to retrieve content from specified URL.
+- web_search: Search web content. Use search engine to find relevant information.
+- grep: Search for matching content in files. Supports regular expressions and context display.
+- tool_search: Search available tools. Search for matching tools based on function description.
+- execute_code: Execute Python code.
+- set_timer: Set timer reminder or timer to execute tools.
+- cancel_timer: Cancel a timer task.
+- list_timers: Get all timer tasks list.

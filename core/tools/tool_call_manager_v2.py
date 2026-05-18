@@ -280,7 +280,7 @@ class ToolCallManagerV2:
     }
 
     def parse_tool_calls(self, ai_response: str) -> List[Dict[str, Any]]:
-        """Parse tool calls from AI response - supports multiple JSON objects"""
+        """Parse tool calls from AI response - supports multiple JSON objects and arrays"""
         tool_calls = []
 
         try:
@@ -308,6 +308,10 @@ class ToolCallManagerV2:
                                     "tool": tc.get("name", tc.get("tool")),
                                     "arguments": tc.get("args", tc.get("arguments", {}))
                                 })
+                    elif isinstance(data, list):
+                        for item in data:
+                            if isinstance(item, dict) and "tool" in item and "arguments" in item:
+                                tool_calls.append(item)
                 except json.JSONDecodeError:
                     pass
 
@@ -508,6 +512,19 @@ class ToolCallManagerV2:
             if not ai_response or not ai_response.strip():
                 return ""
             
+            trimmed_response = ai_response.strip()
+            
+            # 尝试解析为 JSON 数组
+            if trimmed_response.startswith('['):
+                try:
+                    data = json.loads(trimmed_response)
+                    if isinstance(data, list) and len(data) > 0:
+                        for item in data:
+                            if isinstance(item, dict) and "text" in item:
+                                return item["text"].strip()
+                except json.JSONDecodeError:
+                    pass
+            
             # 使用与 _extract_all_json_objects 相同的逻辑找出所有 JSON 位置
             stack = []
             json_ranges = []
@@ -578,7 +595,6 @@ class ToolCallManagerV2:
         self._tool_call_history = []
         injected_tools = set()
         immediate_response = ""
-        first_tool_call = True
 
         for step in range(max_steps):
             logger.info(f"[ToolCallManagerV2] Executing step {step + 1}/{max_steps}")
@@ -730,10 +746,9 @@ If you have completed the user's requested task, please give the final response.
 If you need to continue operations, please call the next tool.
 """
             
-            if first_tool_call and on_immediate_response and immediate_response:
+            if on_immediate_response and immediate_response:
                 logger.info(f"[ToolCallManagerV2] Triggering immediate response callback: {immediate_response[:50]}...")
                 on_immediate_response(immediate_response)
-                first_tool_call = False
 
         logger.warning(f"[ToolCallManagerV2] Reached maximum iterations: {max_steps}")
         return "Sorry, I need more steps to complete this task. Please try again later or simplify your request.", self._tool_call_history
