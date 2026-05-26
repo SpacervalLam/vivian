@@ -306,7 +306,9 @@ class VectorStoreAdapter(SimplifiedMemoryStore):
         try:
             if self.store_type == StorageType.CHROMA:
                 from chromadb import PersistentClient
-                self._vector_store = PersistentClient(path=os.path.join(self.data_dir, "chromadb"))
+                chromadb_path = os.path.join(self.data_dir, "chromadb")
+                os.makedirs(chromadb_path, exist_ok=True)
+                self._vector_store = PersistentClient(path=chromadb_path)
                 self._collection = self._vector_store.get_or_create_collection("memories")
             elif self.store_type == StorageType.FAISS:
                 import faiss

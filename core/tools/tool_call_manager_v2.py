@@ -84,7 +84,50 @@ class ToolListTool:
             "Then select the appropriate tool based on user requirements."
         )
         self._tool_system = tool_system
+        self._definition_loader = None
+        self._load_definition_loader()
 
+    def _load_definition_loader(self):
+        """Load tool definition loader for dynamic tool loading from Markdown"""
+        try:
+            from core.tools.tool_definition_loader import get_tool_loader
+            self._definition_loader = get_tool_loader()
+            logger.info("[ToolListTool] Tool definition loader initialized")
+        except Exception as e:
+            logger.warning(f"[ToolListTool] Failed to load tool definition loader: {e}")
+
+    def load_from_md(self, file_path: str) -> bool:
+        """
+        Load tool definitions from Markdown file
+        
+        Args:
+            file_path: Path to Markdown file containing tool definitions
+        
+        Returns:
+            True if loaded successfully
+        """
+        if not self._definition_loader:
+            logger.warning("[ToolListTool] Definition loader not available")
+            return False
+        
+        return self._definition_loader.load_from_file(file_path)
+    
+    def load_from_md_directory(self, dir_path: str) -> int:
+        """
+        Load tool definitions from all Markdown files in a directory
+        
+        Args:
+            dir_path: Directory path containing tool definition files
+        
+        Returns:
+            Number of tools loaded
+        """
+        if not self._definition_loader:
+            logger.warning("[ToolListTool] Definition loader not available")
+            return 0
+        
+        return self._definition_loader.load_from_directory(dir_path)
+    
     def get_tools_for_ai(self) -> str:
         """Get formatted tool list for AI (compact version, saves tokens)"""
         if self._tool_system is None:

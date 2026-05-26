@@ -119,53 +119,53 @@ class SmartMemoryExtractor:
                 self._in_progress = False
     
     async def _analyze_with_llm_async(self, dialog_text: str) -> Optional[Dict[str, Any]]:
-        system_prompt = """你是一个拥有敏锐上下文洞察力的记忆管理大脑。
-请分析以下对话，判断是否包含值得长期保存的关于用户的事实、偏好、习惯或关系。
+        system_prompt = """You are a memory management brain with sharp contextual insight.
+Analyze the following conversation to determine if it contains facts, preferences, habits, or relationships about the user that are worth saving long-term. Evaluate how valuable this memory will be for future conversations, on a scale of 0-1.
 
-规则：
-1. 忽略当前对话的短期任务上下文（如"帮我写段代码"、"打开浏览器"）。
-2. 捕捉深层次的偏好（如"用户不喜欢被过度打扰"、"用户常用Python编程"）。
-3. 重要的个人健康信息、过敏情况必须优先保存。
-4. 判断操作类型：
-   - ADD: 全新的事实
-   - UPDATE: 修正了之前的已知事实（如用户改变了主意）
-   - DELETE: 用户明确要求忘记某事
+Rules:
+1. Ignore short-term task context in the current conversation (e.g., "help me write code", "open browser").
+2. Capture deep-seated preferences (e.g., "user doesn't like being disturbed too much", "user frequently uses Python").
+3. Important personal health information and allergies must be prioritized for saving.
+4. Determine operation type:
+   - ADD: Completely new fact
+   - UPDATE: Corrects a previously known fact (e.g., user changed their mind)
+   - DELETE: User explicitly asks to forget something
 
-记忆类型：
-- user_profile: 用户个人信息（姓名、职业、年龄、过敏等）
-- preference: 用户偏好、习惯、兴趣、厌恶
-- project_context: 项目计划、目标、截止日期
-- relationship: 人际关系信息
-- health: 健康相关信息
+Memory Types:
+- user_profile: User personal information (name, occupation, age, allergies, etc.)
+- preference: User preferences, habits, interests, dislikes
+- project_context: Project plans, goals, deadlines
+- relationship: Relationship information
+- health: Health-related information
 
-重要性评分标准：
-- 0.9-1.0: 核心身份、健康信息（姓名、过敏、严重疾病）
-- 0.7-0.8: 长期偏好（职业、爱好、价值观）
-- 0.4-0.6: 情感事件、计划
-- 0.1-0.3: 临时信息
+Importance Scoring Criteria:
+- 0.9-1: User's hard constraints, long-term preferences, core identity attributes, health information, compliance requirements ("I'm allergic to peanuts", "must use Python 3.11")
+- 0.6-0.8: Project background, key decisions, clear goals ("Our project is mainly for elderly users"), long-term preferences (occupation, hobbies, values)
+- 0.3-0.5: General facts, contextual explanations
+- 0-0.2: Small talk, polite remarks, temporary questions ("Nice weather today")
 
-必须严格输出以下 JSON 格式，不要包含任何其他文本：
+Must output strictly in the following JSON format, without any additional text:
 {
     "has_valuable_memory": true/false,
     "operations": [
         {
             "action": "ADD" | "UPDATE" | "DELETE",
             "type": "user_profile" | "preference" | "project_context" | "relationship" | "health",
-            "content": "提取出的核心记忆点（第一人称陈述句，如'我喜欢喝美式咖啡'）",
+            "content": "Extracted core memory point (first-person declarative sentence, e.g., 'I like drinking American coffee')",
             "importance": 0.1-1.0,
-            "reason": "简要说明为什么提取这条记忆"
+            "reason": "Brief explanation why this memory is extracted"
         }
     ]
 }
 
-如果没有值得保存的内容，has_valuable_memory设为false，operations为空数组。"""
+If there is no content worth saving, set has_valuable_memory to false and operations to empty array."""
 
         full_prompt = f"""{system_prompt}
 
-请分析以下对话：
+Analyze the following conversation:
 {dialog_text}
 
-请以 JSON 格式输出结果。"""
+Output the result in JSON format."""
 
         try:
             logger.info(f"[MemoryExtractor] 发送请求给 LLM，对话长度: {len(dialog_text)}")

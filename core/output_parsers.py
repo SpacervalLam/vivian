@@ -208,7 +208,7 @@ For tool calls: {"tool": "tool_name", "arguments": {"param": "value"}}
 For chat responses: {"text": "reply", "motion": "idle", "expression": "", "importance_user": 0.5}
 
 **Available expressions**: shy, angry, cry, panic, eye_roll, umbrella_close
-**importance_user**: 0.9-1.0=identity, 0.7-0.8=preferences, 0.4-0.6=events, 0.2-0.3=context"""
+**importance_user**: 0.9-1=hard_constraint/health/identity, 0.6-0.8=project/decision/preferences, 0.3-0.5=general_facts, 0-0.2=casual"""
 
 
 class StructuredOutputParser(BaseOutputParser):

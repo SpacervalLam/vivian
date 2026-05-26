@@ -134,7 +134,7 @@ or
 
 **Expression Usage**: Do not set expression by default (expression=""), only set when clearly needed for emotion.
 **Available Expressions**: shy, angry, cry, panic, eye_roll, umbrella_close
-**importance_user**: 0.9-1.0=identity, 0.7-0.8=preferences, 0.4-0.6=events, 0.2-0.3=context"""
+**importance_user**: 0.9-1=hard_constraint/health/identity, 0.6-0.8=project/decision/preferences, 0.3-0.5=general_facts, 0-0.2=casual"""
 
     EXPRESSION_BLOCK = """## Expression Guide
 shy=shy/happy(praise, intimate conversation), angry=angry(ignored), cry=sad(sympathy), panic=panic(emergency), eye_roll=helpless( speechless), umbrella_close=umbrella close"""

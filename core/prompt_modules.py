@@ -278,26 +278,8 @@ Format 3 (Multiple): [{{"tool": "tool1", "arguments": {{...}}}}, {{"tool": "tool
 - Language: Same as user
 - Format: JSON only
 - Reply under 50 chars
-- importance_user: 0.9-1.0=identity, 0.7-0.8=preferences, 0.4-0.6=events, 0.2-0.3=context"""
+- importance_user: 0.9-1=hard_constraint/health/identity, 0.6-0.8=project/decision/preferences, 0.3-0.5=general_facts, 0-0.2=casual"""
 
-    OUTPUT_ZH = """## 输出格式（重要：仅JSON）
-你必须仅输出有效的JSON，前后不能有其他文本。
-
-格式1（聊天）：{{"text": "回复", "motion": "idle", "expression": "", "importance_user": 0.5}}
-格式2（单个工具调用）：{{"tool": "工具名", "arguments": {{"参数": "值"}}}}
-格式3（多个工具调用）：[{{"tool": "工具1", "arguments": {{...}}}}, {{"tool": "工具2", "arguments": {{...}}}}]
-
-## 表情指南
-- 默认不设置表情(expression="")，只在有明确情绪需要时才设置表情
-- 可用表情：shy, angry, cry, panic, eye_roll, umbrella_close
-- shy=害羞/开心(表扬、亲密对话), angry=生气(被忽略), cry=难过(同情), panic=慌张(紧急情况), eye_roll=无语(无话可说), umbrella_close=收伞
-
-## 输出要求
-- 语言：与用户一致
-- 格式：仅JSON
-- 回复长度：50字以内
-- importance_user: 0.9-1.0=身份信息, 0.7-0.8=偏好, 0.4-0.6=事件, 0.2-0.3=上下文"""
-    
     def format(self, context: Dict[str, Any]) -> str:
         # Always return English for prompt structure
         return self.OUTPUT_EN

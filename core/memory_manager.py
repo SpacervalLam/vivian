@@ -555,11 +555,11 @@ class MemoryManager:
                     
                     from core.memory.compressor import (
                         LangChainMemoryCompressor, SimpleMemoryCompressor)
+                    from core.memory.enhanced_compressor import EnhancedMemoryCompressor
                     
-                    self.compressor = (
-                        LangChainMemoryCompressor()
-                        if LangChainMemoryCompressor().langchain_available
-                        else SimpleMemoryCompressor()
+                    self.compressor = EnhancedMemoryCompressor(
+                        ai_manager=self.ai_manager,
+                        target_compression_ratio=5.0
                     )
                     
                     from core.memory.compressor import AutoGPTMemoryPrioritizer
@@ -587,6 +587,11 @@ class MemoryManager:
                     from core.memory_auto_extractor import AutoMemoryExtractor
                     self.auto_extractor = AutoMemoryExtractor(self, ai_manager)
                     logger.debug("自动记忆提取器初始化完成")
+                    
+                    # 初始化提取协调器（异步压缩 + Coalescing策略）
+                    from core.memory.extraction_coordinator import ExtractionCoordinator
+                    self.extraction_coordinator = ExtractionCoordinator(self, ai_manager)
+                    logger.debug("提取协调器初始化完成")
                     
                     # 初始化中期记忆
                     from core.memory.mid_term import MidTermMemory
@@ -851,12 +856,20 @@ class MemoryManager:
         return memory_id
     
     def _check_memory_limits(self) -> None:
-        """检查记忆限制"""
+        """检查记忆限制 - 使用提取协调器进行异步处理"""
         short_term_memories = self.list_short_term_memories()
         total_short_term_tokens = sum(m.token_count or 0 for m in short_term_memories)
         
-        if total_short_term_tokens > self.token_limit * self.chat_history_token_ratio:
-            self.consolidate_sensory_to_semantic()
+        # 使用提取协调器进行异步压缩/提取
+        if hasattr(self, 'extraction_coordinator') and self.extraction_coordinator:
+            self.extraction_coordinator.check_and_trigger(
+                current_tokens=total_short_term_tokens,
+                max_tokens=self.token_limit
+            )
+        else:
+            # 回退到同步处理
+            if total_short_term_tokens > self.token_limit * self.chat_history_token_ratio:
+                self.consolidate_sensory_to_semantic()
     
     def get_memory(
         self, memory_id: str, memory_type: str = "short_term"
