@@ -6,7 +6,7 @@ import os
 import random
 import time
 from collections import deque
-from typing import Any, Dict, Optional, Tuple, Type, List
+from typing import Any, Dict, Optional, Tuple, Type, List, Callable, AsyncGenerator
 from functools import lru_cache, wraps
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -1351,3 +1351,105 @@ class AIManager:
     def get_supported_providers() -> list:
         """获取支持的AI提供商列表"""
         return ProviderFactory.get_supported_providers()
+
+
+class StreamingAIManager:
+    """流式AI管理器，集成StreamingJsonParser处理流式输出"""
+    
+    def __init__(self, ai_manager: AIManager):
+        self._ai_manager = ai_manager
+        self._parser = None
+    
+    async def query_stream_with_parser(
+        self,
+        prompt: str,
+        on_text_chunk: Optional[Callable[[str], None]] = None,
+        on_complete: Optional[Callable[[Dict[str, Any]], None]] = None,
+        on_error: Optional[Callable[[str], None]] = None,
+        use_history: bool = True,
+        max_retries: int = 2,
+    ) -> Dict[str, Any]:
+        """
+        使用流式解析器查询AI
+        
+        Args:
+            prompt: 用户提示词
+            on_text_chunk: text字段内容回调（实时更新）
+            on_complete: 完整JSON解析完成回调
+            on_error: 错误回调
+            use_history: 是否使用对话历史
+            max_retries: 最大重试次数
+        
+        Returns:
+            完整的解析结果JSON
+        """
+        from core.streaming_json_parser import StreamingJsonParser
+        
+        parser = StreamingJsonParser(
+            on_text_chunk=on_text_chunk,
+            on_complete=on_complete,
+            on_error=on_error
+        )
+        
+        self._parser = parser
+        
+        try:
+            async for chunk in self._ai_manager.query_short_stream_async(
+                prompt,
+                use_history=use_history,
+                max_retries=max_retries
+            ):
+                parser.feed(chunk)
+            
+            result = parser.get_result()
+            if result.is_complete and result.full_json:
+                return result.full_json
+            elif result.text_content:
+                return {"text": result.text_content, "motion": "idle", "expression": ""}
+            else:
+                return {"text": "（薇薇安走神了...）", "motion": "idle", "expression": ""}
+                
+        except Exception as e:
+            if on_error:
+                on_error(str(e))
+            logger.error(f"[StreamingAIManager] 流式解析失败: {e}")
+            return {"text": "抱歉，我有点卡顿...", "motion": "idle", "expression": ""}
+    
+    def get_parser(self):
+        """获取当前解析器实例"""
+        return self._parser
+
+
+def create_streaming_query(
+    ai_manager: AIManager,
+    on_text_update: Callable[[str], None],
+    on_tool_call: Optional[Callable[[Dict[str, Any]], None]] = None,
+    on_complete: Optional[Callable[[Dict[str, Any]], None]] = None
+) -> Callable[[str], AsyncGenerator[str, None]]:
+    """
+    创建流式查询函数
+    
+    Args:
+        ai_manager: AIManager实例
+        on_text_update: 文本更新回调
+        on_tool_call: 工具调用回调
+        on_complete: 完成回调
+    
+    Returns:
+        流式查询函数
+    """
+    from core.streaming_json_parser import StreamingResponseHandler
+    
+    handler = StreamingResponseHandler(
+        on_text_update=on_text_update,
+        on_tool_call=on_tool_call,
+        on_complete=on_complete
+    )
+    
+    async def stream_query(prompt: str) -> AsyncGenerator[str, None]:
+        async for text in handler._process_stream(
+            ai_manager.query_short_stream_async(prompt, use_history=True)
+        ):
+            yield text
+    
+    return stream_query

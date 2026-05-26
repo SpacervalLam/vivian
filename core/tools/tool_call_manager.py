@@ -265,16 +265,18 @@ class ToolCallManager:
         Returns:
             系统提示字符串
         """
-        # 精简版系统提示：默认不在每次请求中嵌入完整工具清单，以节省 token。
-        # 当模型决定要使用某个工具时，应先调用 `tool_list` 或请求注入完整工具说明（core/tools/TOOLS.md）。
         if self._tool_list_tool is None:
             return "工具系统未初始化"
 
         return (
             "You can call tools to perform system operations. To save tokens,\n"
             "if you need to see complete tool parameters, please call tool_list or request injection of complete tool documentation (file: core/tools/TOOLS.md).\n"
-            "When calling tools, return JSON format: {\"tool\": \"tool_name\", \"arguments\": {\"param_name\": \"value\"}}.\n"
-            "Example: {\"tool\": \"open_application\", \"arguments\": {\"app_path\": \"C:\\\\Windows\\\\notepad.exe\"}}\n"
+            "\n## Output Format (JSON Only)\n"
+            "**Streaming Output**: The \"text\" field is displayed in real-time. ALWAYS include text field for better user experience!\n"
+            "- Chat: {\"text\": \"Your reply\", \"motion\": \"idle\", \"expression\": \"\", \"importance_user\": 0.5}\n"
+            "- Tool Call: {\"text\": \"Explanation for user\", \"tool\": \"tool_name\", \"arguments\": {\"param_name\": \"value\"}}\n"
+            "- Multiple Tools: [{\"tool\": \"tool1\", \"arguments\": {...}}, {\"tool\": \"tool2\", \"arguments\": {...}}]\n"
+            "\nExample: {\"text\": \"Opening Notepad\", \"tool\": \"open_application\", \"arguments\": {\"app_path\": \"notepad.exe\"}}\n"
         )
 
     def parse_tool_calls(self, ai_response: str) -> List[Dict[str, Any]]:

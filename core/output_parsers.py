@@ -90,15 +90,18 @@ class JSONOutputParser(BaseOutputParser):
 class VivianResponseParser(BaseOutputParser):
     """
     Vivian专用响应解析器，支持工具调用和聊天响应
+    支持新的流式输出格式，优先识别text字段
     """
 
     def parse(self, text: str) -> Dict[str, Any]:
         """
         解析Vivian的响应格式
 
-        支持两种格式：
-        1. 工具调用: {"tool": "tool_name", "arguments": {...}}
+        支持多种格式：
+        1. 工具调用: {"text": "...", "tool": "tool_name", "arguments": {...}}
         2. 聊天响应: {"text": "...", "motion": "...", "expression": "...", "importance_user": 0.5}
+        3. 批量工具调用: [{"tool": "tool1", "arguments": {...}}, {"tool": "tool2", "arguments": {...}}]
+        4. 混合模式: [{"text": "...", "tool": "tool1", "arguments": {...}}, {"tool": "tool2", "arguments": {...}}]
 
         Args:
             text: 响应文本
@@ -111,6 +114,10 @@ class VivianResponseParser(BaseOutputParser):
             json_parser = JSONOutputParser()
             result = json_parser.parse(text)
 
+            # 如果是列表格式（多工具调用），提取第一个有效项
+            if isinstance(result, list):
+                return self._parse_array_response(result)
+
             # 验证响应格式
             self._validate_vivian_response(result)
             return result
@@ -122,14 +129,79 @@ class VivianResponseParser(BaseOutputParser):
             if fixed_text != text:
                 try:
                     result = json_parser.parse(fixed_text)
+                    if isinstance(result, list):
+                        return self._parse_array_response(result)
                     self._validate_vivian_response(result)
                     return result
                 except Exception:
                     pass
 
+            # 如果都失败，尝试使用流式解析器处理（支持顶级数组）
+            try:
+                from core.streaming_json_parser import StreamingJsonParser
+                parser = StreamingJsonParser()
+                for char in text:
+                    parser.feed(char)
+                
+                stream_result = parser.get_result()
+                
+                # 检查是否解析了顶级数组
+                if stream_result.full_array:
+                    return self._parse_array_response(stream_result.full_array)
+                
+                # 检查是否解析了对象
+                if stream_result.full_json:
+                    self._validate_vivian_response(stream_result.full_json)
+                    return stream_result.full_json
+            except Exception:
+                pass
+
             # 如果都失败，返回默认响应
             logger.error(f"无法解析响应: {text[:200]}...")
             return self._get_default_response()
+
+    def _parse_array_response(self, arr: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        解析数组格式的响应（多工具调用）
+        
+        Args:
+            arr: 响应数组
+        
+        Returns:
+            合并后的响应字典，包含所有工具调用
+        """
+        if not arr:
+            return self._get_default_response()
+
+        # 查找包含text字段的项作为主响应
+        main_response = None
+        tool_calls = []
+
+        for item in arr:
+            if isinstance(item, dict):
+                if "text" in item and main_response is None:
+                    # 只取第一个包含text的项作为主响应
+                    main_response = item.copy()
+                if "tool" in item and "arguments" in item:
+                    tool_calls.append({"tool": item["tool"], "arguments": item["arguments"]})
+
+        # 如果找到主响应，添加工具调用列表
+        if main_response and tool_calls:
+            main_response["tool_calls"] = tool_calls
+            return main_response
+        # 如果只有工具调用（没有主响应），返回包含所有工具调用的响应
+        elif tool_calls:
+            return {
+                "text": f"Executing {len(tool_calls)} tool(s)",
+                "tool_calls": tool_calls,
+                "motion": "idle",
+                "expression": ""
+            }
+        # 如果只有主响应
+        elif main_response:
+            return main_response
+
+        return self._get_default_response()
 
     def _validate_vivian_response(self, response: Dict[str, Any]) -> None:
         """
@@ -141,7 +213,7 @@ class VivianResponseParser(BaseOutputParser):
         Raises:
             ValueError: 当格式无效时
         """
-        # 检查是否是工具调用
+        # 检查是否是工具调用（新格式：text字段必须存在用于流式输出）
         if "tool" in response:
             if not isinstance(response.get("tool"), str):
                 raise ValueError("Tool name must be a string")
@@ -150,15 +222,14 @@ class VivianResponseParser(BaseOutputParser):
             if not isinstance(response["arguments"], dict):
                 raise ValueError("Tool arguments must be a dictionary")
 
-        # 检查是否是聊天响应
+        # 检查是否是聊天响应（text字段必须存在）
         elif "text" in response:
-            required_fields = ["text", "motion", "expression", "importance_user"]
-            for field in required_fields:
-                if field not in response:
-                    raise ValueError(f"Chat response missing required field: {field}")
+            # text字段是必须的，用于流式输出
+            if not isinstance(response.get("text"), str):
+                raise ValueError("text field must be a string")
 
-            if not isinstance(response.get("importance_user"), (int, float)):
-                raise ValueError("importance_user must be a number")
+            # motion和expression是可选的，提供默认值
+            # importance_user也是可选的，提供默认值
 
         else:
             raise ValueError("Response must contain either 'tool' or 'text' field")
@@ -203,9 +274,14 @@ class VivianResponseParser(BaseOutputParser):
         """
         获取Vivian响应格式指令
         """
-        return """**Output ONLY JSON**:
-For tool calls: {"tool": "tool_name", "arguments": {"param": "value"}}
-For chat responses: {"text": "reply", "motion": "idle", "expression": "", "importance_user": 0.5}
+        return """**Output ONLY JSON** (Streaming Support):
+
+**Format 1 - Chat**: {"text": "Your reply", "motion": "idle", "expression": "", "importance_user": 0.5}
+**Format 2 - Tool Call**: {"text": "Explanation", "tool": "tool_name", "arguments": {"param": "value"}}
+**Format 3 - Multiple Tools**: [{"tool": "tool1", "arguments": {...}}, {"tool": "tool2", "arguments": {...}}]
+**Format 4 - Text + Tools**: [{"text": "Opening apps", "tool": "open_application", "arguments": {...}}]
+
+**Important**: Always include "text" field for streaming output!
 
 **Available expressions**: shy, angry, cry, panic, eye_roll, umbrella_close
 **importance_user**: 0.9-1=hard_constraint/health/identity, 0.6-0.8=project/decision/preferences, 0.3-0.5=general_facts, 0-0.2=casual"""
