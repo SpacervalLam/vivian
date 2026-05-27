@@ -131,6 +131,12 @@ class Brain:
         max_history_len = config_manager.get("dialogue.max_history_len", 10)
         self.dialogue_manager = DialogueManager(max_history_len=max_history_len)
         logger.debug(f"Dialogue manager initialized, max history: {max_history_len}")
+        
+        # 加载之前保存的对话历史
+        try:
+            self.dialogue_manager.load_history()
+        except Exception as e:
+            logger.error(f"加载对话历史失败: {e}")
 
     def _init_emotion_analyzer(self):
         """Initialize emotion analyzer"""
@@ -651,10 +657,29 @@ class Brain:
 
     async def _async_get_context(self) -> Dict[str, str]:
         """Async get context"""
+        from datetime import datetime
+        
         if not self.environment_manager:
             return {"time": "", "active_app": "", "season": ""}
+        
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, lambda: self.environment_manager.get_environment_info())
+        env_info = await loop.run_in_executor(None, lambda: self.environment_manager.get_environment_info())
+        
+        month = datetime.now().month
+        if month in [3, 4, 5]:
+            season = "Spring"
+        elif month in [6, 7, 8]:
+            season = "Summer"
+        elif month in [9, 10, 11]:
+            season = "Autumn"
+        else:
+            season = "Winter"
+        
+        return {
+            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S %A"),
+            "active_app": env_info.get("current_window", "Unknown"),
+            "season": season,
+        }
 
     async def _async_get_tools_text(self) -> str:
         """Async get tools text"""

@@ -366,7 +366,7 @@ def create_glob_tool() -> Tool:
 
     return build_tool(
         name="glob",
-        description="使用Glob模式搜索文件。支持递归搜索。",
+        description="Search files using glob pattern. Supports recursive search.",
         input_schema=GlobInput,
         output_schema=GlobOutput,
         call=glob_search,
@@ -410,7 +410,7 @@ def create_open_application_tool() -> Tool:
 
     return build_tool(
         name="open_application",
-        description="启动Windows应用程序。",
+        description="Launch Windows application.",
         input_schema=OpenApplicationInput,
         output_schema=OpenApplicationOutput,
         call=open_app,
@@ -454,7 +454,7 @@ def create_search_files_tool() -> Tool:
 
     return build_tool(
         name="search_files",
-        description="在指定目录中搜索文件。",
+        description="Search files in specified directory.",
         input_schema=SearchFilesInput,
         output_schema=SearchFilesOutput,
         call=search_files,
@@ -528,7 +528,7 @@ def create_close_application_tool() -> Tool:
 
     return build_tool(
         name="close_application",
-        description="关闭一个正在运行的应用程序。",
+        description="Close a running application.",
         input_schema=CloseApplicationInput,
         output_schema=CloseApplicationOutput,
         call=close_app,
@@ -589,7 +589,7 @@ def create_open_folder_tool() -> Tool:
 
     return build_tool(
         name="open_folder",
-        description="打开一个文件夹。",
+        description="Open a folder in file explorer.",
         input_schema=OpenFolderInput,
         output_schema=OpenFolderOutput,
         call=open_folder,
@@ -641,7 +641,7 @@ def create_open_url_tool() -> Tool:
 
     return build_tool(
         name="open_url",
-        description="在浏览器中打开网址。",
+        description="Open a URL in browser.",
         input_schema=OpenUrlInput,
         output_schema=OpenUrlOutput,
         call=open_url,
@@ -742,7 +742,7 @@ def create_set_wallpaper_tool() -> Tool:
 
     return build_tool(
         name="set_wallpaper",
-        description="设置桌面壁纸。如果不提供图片路径，会自动从系统壁纸文件夹中随机选择一张。",
+        description="Set desktop wallpaper. If no image path provided, randomly selects from system wallpaper folder.",
         input_schema=SetWallpaperInput,
         output_schema=SetWallpaperOutput,
         call=set_wallpaper,
@@ -752,10 +752,10 @@ def create_set_wallpaper_tool() -> Tool:
 
 
 class WallpaperEngineInput(BaseModel):
-    """Wallpaper Engine 命令输入"""
-    action: str = Field(description="操作类型：open（打开壁纸）、pause（暂停）、play（恢复）、stop（停止）、mute（静音）、unmute（取消静音）、next（下一张）")
-    wallpaper_path: Optional[str] = Field(default=None, description="壁纸文件路径（仅 open 操作需要）")
-    monitor: Optional[int] = Field(default=0, description="显示器索引（从0开始，默认0）")
+    """Wallpaper Engine command input"""
+    action: str = Field(description="Action type: open (open wallpaper), pause (pause), play (resume), stop (stop), mute (mute), unmute (unmute), next (next wallpaper)")
+    wallpaper_path: Optional[str] = Field(default=None, description="Wallpaper file path (required for open action only)")
+    monitor: Optional[int] = Field(default=0, description="Monitor index (starts from 0, default 0)")
 
 
 class WallpaperEngineOutput(BaseModel):
@@ -1015,11 +1015,11 @@ def create_list_wallpapers_tool() -> Tool:
 
     return build_tool(
         name="list_wallpapers",
-        description="列出所有 Wallpaper Engine 壁纸。返回壁纸列表，包含壁纸ID、名称和文件路径。使用此工具后，可以调用 wallpaper_engine 工具的 open 操作来更换壁纸。",
+        description="List all Wallpaper Engine wallpapers. Returns wallpaper list with ID, name and file path. After using this tool, call wallpaper_engine tool's open action to change wallpaper.",
         input_schema=None,
         output_schema=ListWallpapersOutput,
         call=list_wallpapers,
-        search_hint="list wallpapers, show wallpapers, wallpaper list, 壁纸列表",
+        search_hint="list wallpapers, show wallpapers, wallpaper list",
         user_facing_name=lambda input_data=None: "List Wallpapers",
     )
 
@@ -1078,7 +1078,7 @@ def create_take_screenshot_tool() -> Tool:
 
     return build_tool(
         name="take_screenshot",
-        description="截取当前屏幕并保存。",
+        description="Capture and save current screen.",
         input_schema=TakeScreenshotInput,
         output_schema=TakeScreenshotOutput,
         call=take_screenshot,
@@ -1136,7 +1136,7 @@ def create_minimize_window_tool() -> Tool:
 
     return build_tool(
         name="minimize_window",
-        description="最小化当前窗口。",
+        description="Minimize current window.",
         input_schema=MinimizeWindowInput,
         output_schema=MinimizeWindowOutput,
         call=minimize_window,
@@ -1192,7 +1192,7 @@ def create_maximize_window_tool() -> Tool:
 
     return build_tool(
         name="maximize_window",
-        description="最大化当前窗口。",
+        description="Maximize current window.",
         input_schema=MaximizeWindowInput,
         output_schema=MaximizeWindowOutput,
         call=maximize_window,
@@ -1248,7 +1248,7 @@ def create_close_window_tool() -> Tool:
 
     return build_tool(
         name="close_window",
-        description="关闭当前窗口。",
+        description="Close current window.",
         input_schema=CloseWindowInput,
         output_schema=CloseWindowOutput,
         call=close_window,
@@ -1302,7 +1302,7 @@ def create_get_system_info_tool() -> Tool:
 
     return build_tool(
         name="get_system_info",
-        description="获取系统信息。",
+        description="Get system information.",
         input_schema=GetSystemInfoInput,
         output_schema=GetSystemInfoOutput,
         call=get_system_info,
@@ -1351,7 +1351,7 @@ def create_get_clipboard_text_tool() -> Tool:
 
     return build_tool(
         name="get_clipboard_text",
-        description="获取剪贴板文本内容。",
+        description="Get clipboard text content.",
         input_schema=GetClipboardTextInput,
         output_schema=GetClipboardTextOutput,
         call=get_clipboard_text,
@@ -1412,7 +1412,7 @@ def create_set_clipboard_text_tool() -> Tool:
 
     return build_tool(
         name="set_clipboard_text",
-        description="设置剪贴板文本内容。",
+        description="Set clipboard text content.",
         input_schema=SetClipboardTextInput,
         output_schema=SetClipboardTextOutput,
         call=set_clipboard_text,
@@ -1471,7 +1471,7 @@ def create_get_running_processes_tool() -> Tool:
 
     return build_tool(
         name="get_running_processes",
-        description="获取当前运行中的进程列表。",
+        description="Get list of currently running processes.",
         input_schema=GetRunningProcessesInput,
         output_schema=GetRunningProcessesOutput,
         call=get_running_processes,
@@ -1515,7 +1515,7 @@ def create_get_active_window_tool() -> Tool:
 
     return build_tool(
         name="get_active_window",
-        description="获取当前活动窗口的标题。",
+        description="Get title of current active window.",
         input_schema=GetActiveWindowInput,
         output_schema=GetActiveWindowOutput,
         call=get_active_window,
@@ -1582,7 +1582,7 @@ def create_copy_file_tool() -> Tool:
 
     return build_tool(
         name="copy_file",
-        description="复制文件。",
+        description="Copy file.",
         input_schema=CopyFileInput,
         output_schema=CopyFileOutput,
         call=copy_file,
@@ -1647,7 +1647,7 @@ def create_move_file_tool() -> Tool:
 
     return build_tool(
         name="move_file",
-        description="移动文件。",
+        description="Move file.",
         input_schema=MoveFileInput,
         output_schema=MoveFileOutput,
         call=move_file,
@@ -1709,7 +1709,7 @@ def create_delete_file_tool() -> Tool:
 
     return build_tool(
         name="delete_file",
-        description="删除文件或文件夹。",
+        description="Delete file or folder.",
         input_schema=DeleteFileInput,
         output_schema=DeleteFileOutput,
         call=delete_file,
@@ -1768,7 +1768,7 @@ def create_create_file_tool() -> Tool:
 
     return build_tool(
         name="create_file",
-        description="创建新文件。",
+        description="Create new file.",
         input_schema=CreateFileInput,
         output_schema=CreateFileOutput,
         call=create_file,
@@ -1820,7 +1820,7 @@ def create_list_files_tool() -> Tool:
 
     return build_tool(
         name="list_files",
-        description="列出目录中的文件。",
+        description="List files in directory.",
         input_schema=ListFilesInput,
         output_schema=ListFilesOutput,
         call=list_files,
@@ -1886,7 +1886,7 @@ def create_web_fetch_tool() -> Tool:
 
     return build_tool(
         name="web_fetch",
-        description="获取网页内容。用于获取指定URL的网页内容。",
+        description="Fetch web page content. Get content from specified URL.",
         input_schema=WebFetchInput,
         output_schema=WebFetchOutput,
         call=web_fetch,
@@ -1933,24 +1933,26 @@ def create_web_search_tool() -> Tool:
             import json
 
             encoded_query = urllib.parse.quote_plus(query)
-            search_url = f"https://ddg-api.herokuapp.com/search?q={encoded_query}&max_results={num_results}"
+            search_url = f"https://api.duckduckgo.com/?q={encoded_query}&format=json&no_html=1&no_redirect=1"
 
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'application/json',
             }
 
             req = urllib.request.Request(search_url, headers=headers)
             with urllib.request.urlopen(req, timeout=30) as response:
                 data = json.loads(response.read().decode('utf-8', errors='ignore'))
 
-            results = [
-                SearchResult(
-                    title=item.get('title', ''),
-                    url=item.get('url', ''),
-                    snippet=item.get('description', '')
-                )
-                for item in data[:num_results]
-            ]
+            results = []
+            if 'RelatedTopics' in data:
+                for item in data['RelatedTopics'][:num_results]:
+                    if isinstance(item, dict):
+                        results.append(SearchResult(
+                            title=item.get('Text', item.get('Name', '')),
+                            url=item.get('FirstURL', item.get('URL', '')),
+                            snippet=item.get('Description', item.get('Text', '')[:200])
+                        ))
 
             output = WebSearchOutput(
                 query=query,
@@ -1968,11 +1970,11 @@ def create_web_search_tool() -> Tool:
 
     return build_tool(
         name="web_search",
-        description="搜索网络内容。使用搜索引擎搜索相关信息。",
+        description="Search web content using local search tool. ONLY use this tool when you cannot obtain real-time web information through your own built-in web search capability. Use search engine to find relevant information.",
         input_schema=WebSearchInput,
         output_schema=WebSearchOutput,
         call=web_search,
-        search_hint="search web, internet search, google search",
+        search_hint="search web, internet search, google search, real-time information, latest news",
         is_read_only=lambda input_data: True,
         is_open_world=lambda input_data: True,
         user_facing_name=lambda input_data=None: "Web Search",
@@ -2091,7 +2093,7 @@ def create_grep_tool() -> Tool:
 
     return build_tool(
         name="grep",
-        description="在文件中搜索匹配的内容。支持正则表达式和上下文显示。",
+        description="Search matching content in files. Supports regex and context display.",
         input_schema=GrepInput,
         output_schema=GrepOutput,
         call=grep_search,
@@ -2186,7 +2188,7 @@ def create_tool_search_tool() -> Tool:
 
     return build_tool(
         name="tool_search",
-        description="搜索可用的工具。根据功能描述搜索匹配的工具。",
+        description="Search available tools. Find matching tools based on function description.",
         input_schema=ToolSearchInput,
         output_schema=ToolSearchOutput,
         call=tool_search,
@@ -2199,8 +2201,8 @@ def create_tool_search_tool() -> Tool:
 # ============ 代码执行和定时任务工具 ============
 
 class ExecuteCodeInput(BaseModel):
-    """执行代码输入"""
-    code: str = Field(description="要执行的 Python 代码")
+    """Execute code input"""
+    code: str = Field(description="Python code to execute")
 
 
 class ExecuteCodeOutput(BaseModel):
@@ -2246,7 +2248,7 @@ def create_execute_code_tool() -> Tool:
 
     return build_tool(
         name="execute_code",
-        description="执行 Python 代码。",
+        description="Execute Python code.",
         input_schema=ExecuteCodeInput,
         output_schema=ExecuteCodeOutput,
         call=execute_code,
@@ -2257,12 +2259,12 @@ def create_execute_code_tool() -> Tool:
 
 
 class SetTimerInput(BaseModel):
-    """设置定时任务输入"""
-    time_spec: str = Field(description="时间规格，ISO 8601格式。持续时间：PTnHnMnS（如PT2M表示2分钟后）；日期时间：YYYY-MM-DDTHH:MM:SS")
-    message: Optional[str] = Field(default=None, description="提醒消息内容（当不需要执行工具时使用）")
-    tool_name: Optional[str] = Field(default=None, description="要定时执行的工具名称（当需要执行工具时使用）")
-    tool_arguments: Optional[Dict[str, Any]] = Field(default=None, description="工具参数（与tool_name配合使用）")
-    repeat_interval: Optional[int] = Field(default=None, description="重复间隔（秒），默认None表示单次")
+    """Set timer input"""
+    time_spec: str = Field(description="Time specification in ISO 8601 format. Duration: PTnHnMnS (e.g., PT2M means 2 minutes later); DateTime: YYYY-MM-DDTHH:MM:SS")
+    message: Optional[str] = Field(default=None, description="Reminder message content (used when no tool execution needed)")
+    tool_name: Optional[str] = Field(default=None, description="Tool name to execute (used when tool execution needed)")
+    tool_arguments: Optional[Dict[str, Any]] = Field(default=None, description="Tool arguments (used with tool_name)")
+    repeat_interval: Optional[int] = Field(default=None, description="Repeat interval in seconds, default None means one-time")
 
 
 class SetTimerOutput(BaseModel):
@@ -2329,7 +2331,7 @@ def create_set_timer_tool() -> Tool:
 
     return build_tool(
         name="set_timer",
-        description="设置定时提醒或定时执行工具。",
+        description="Set a timer reminder or schedule tool execution.",
         input_schema=SetTimerInput,
         output_schema=SetTimerOutput,
         call=set_timer,
@@ -2380,7 +2382,7 @@ def create_cancel_timer_tool() -> Tool:
 
     return build_tool(
         name="cancel_timer",
-        description="取消定时任务。",
+        description="Cancel scheduled timer.",
         input_schema=CancelTimerInput,
         output_schema=CancelTimerOutput,
         call=cancel_timer,
@@ -2450,7 +2452,7 @@ def create_list_timers_tool() -> Tool:
 
     return build_tool(
         name="list_timers",
-        description="获取所有定时任务列表。",
+        description="Get list of all scheduled timers.",
         input_schema=ListTimersInput,
         output_schema=ListTimersOutput,
         call=list_timers,

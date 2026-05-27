@@ -734,11 +734,11 @@ class PromptBuildingRunnable(VivianRunnable[BrainState, BrainState]):
             else:
                 input.memory_text = ""
             
-            if self.dialogue_manager and not (self.use_time_stamped_memory and self.time_stamped_memory):
+            if self.dialogue_manager:
                 history_msgs = self.dialogue_manager.get_history_as_messages(10)
                 if history_msgs:
                     input.history_text = "\n".join([
-                        f"{msg['role']}: {msg['content']}"
+                        f"{msg['role']}: {msg['content'][:200]}"
                         for msg in history_msgs
                     ])
                 else:
@@ -867,13 +867,13 @@ class PromptBuildingRunnable(VivianRunnable[BrainState, BrainState]):
                 return ""
             
             async def build_history():
-                if self.dialogue_manager and not (self.use_time_stamped_memory and self.time_stamped_memory):
+                if self.dialogue_manager:
                     loop = asyncio.get_event_loop()
                     history_msgs = await loop.run_in_executor(
-                        None, lambda: self.dialogue_manager.get_history_as_messages(5)
+                        None, lambda: self.dialogue_manager.get_history_as_messages(10)
                     )
                     if history_msgs:
-                        return "\n".join([f"{msg['role']}: {msg['content']}" for msg in history_msgs])
+                        return "\n".join([f"{msg['role']}: {msg['content'][:150]}" for msg in history_msgs])
                 return ""
             
             async def build_context():
@@ -974,8 +974,8 @@ class AIResponseGenerationRunnable(VivianRunnable[BrainState, BrainState]):
         if not input.should_respond or input.is_command:
             return input
         
-        stream_callback = config.get("stream_callback")
-        stream = config.get("stream", False)
+        stream_callback = config.get("metadata.stream_callback")
+        stream = config.get("metadata.stream", False)
         self._saved_immediate_text = None
         
         async def ai_generate_func(prompt: str) -> str:

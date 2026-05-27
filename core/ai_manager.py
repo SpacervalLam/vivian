@@ -664,6 +664,190 @@ class CustomProvider(BaseAIProvider):
     pass
 
 
+class AdapterAIProvider(BaseAIProvider):
+    """基于适配器模式的AI提供商，支持多种API格式"""
+
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        self._adapter = None
+        self._adapter_config = {
+            "base_url": self.config.get("endpoint", ""),
+            "api_key": self.config.get("api_key", ""),
+            "model": self.config.get("model", ""),
+        }
+        self._init_adapter()
+        self._idle_action_triggered = False
+        self._idle_action_lock = threading.Lock()
+        self._idle_action_callback: Optional[Callable[[], None]] = None
+
+    def set_idle_action_callback(self, callback: Optional[Callable[[], None]]) -> None:
+        """设置空闲动作回调函数
+        
+        Args:
+            callback: 回调函数，无参数，无返回值
+        """
+        self._idle_action_callback = callback
+
+    def _init_adapter(self):
+        """初始化适配器"""
+        from core.adapters.llm_adapter_factory import LLMAdapterFactory
+
+        provider_type = self.config.get("provider", "openai")
+        self._adapter = LLMAdapterFactory.create_adapter(provider_type, **self._adapter_config)
+
+    def _get_adapter_config(self) -> Dict[str, Any]:
+        """获取适配器配置（返回缓存值）"""
+        return self._adapter_config
+
+    def trigger_idle_action(self):
+        """触发空闲动作，用于API延迟时显示桌宠小动作"""
+        with self._idle_action_lock:
+            if self._idle_action_triggered:
+                return
+            self._idle_action_triggered = True
+
+        try:
+            if self._idle_action_callback:
+                self._idle_action_callback()
+                logger.debug("[IdleAction] Triggered via callback")
+        except Exception as e:
+            logger.debug(f"[IdleAction] Failed to trigger idle action: {e}")
+        finally:
+            with self._idle_action_lock:
+                self._idle_action_triggered = False
+
+    async def call_async_api(self, prompt: str, max_retries: int = 2) -> str:
+        """使用适配器调用API（异步）"""
+        from core.adapters.llm_adapters import UnifiedChatRequest
+
+        model_name = self.config.get("model", "")
+        logger.info(f"[AdapterAIProvider] 异步API请求开始，模型: {model_name}，提示词长度: {len(prompt)}")
+
+        request = UnifiedChatRequest(
+            model=model_name,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=self.config.get("temperature", 0.7),
+            max_tokens=self.config.get("max_tokens", 1024),
+            stream=False,
+        )
+
+        for attempt in range(max_retries + 1):
+            try:
+                response = await self._adapter.chat(
+                    self._get_adapter_config(), request
+                )
+                return response.content
+            except Exception as e:
+                if attempt < max_retries:
+                    await asyncio.sleep(2**attempt)
+                else:
+                    raise e
+
+    async def call_async_stream_api(self, prompt: str, max_retries: int = 2):
+        """使用适配器调用流式API（异步）"""
+        from core.adapters.llm_adapters import UnifiedChatRequest
+
+        logger.info(f"[AdapterAIProvider] 异步流式API请求开始，提示词长度: {len(prompt)}")
+
+        request = UnifiedChatRequest(
+            model=self.config.get("model", ""),
+            messages=[{"role": "user", "content": prompt}],
+            temperature=self.config.get("temperature", 0.7),
+            max_tokens=self.config.get("max_tokens", 1024),
+            stream=True,
+        )
+
+        from core.adapters.llm_adapters import TypingBuffer
+
+        full_response = ""
+
+        def idle_action():
+            try:
+                if hasattr(self, 'trigger_idle_action'):
+                    self.trigger_idle_action()
+            except Exception as e:
+                logger.debug(f"Failed to trigger idle action: {e}")
+
+        buffer = TypingBuffer(
+            slow_threshold=0.3,
+            min_chunk_size=1,
+            max_chunk_size=8,
+            typing_speed=0.05,
+            idle_action_callback=idle_action,
+        )
+
+        async def consume_and_buffer():
+            nonlocal full_response
+            full_response = ""
+            for attempt in range(max_retries + 1):
+                try:
+                    async for chunk in self._adapter.chat_stream(
+                        self._get_adapter_config(), request
+                    ):
+                        full_response += chunk
+                        await buffer.add_tokens(chunk)
+                    await buffer.signal_end()
+                    return
+                except Exception as e:
+                    if attempt < max_retries:
+                        await asyncio.sleep(2**attempt)
+                    else:
+                        await buffer.signal_end()
+                        raise e
+
+        consume_task = asyncio.create_task(consume_and_buffer())
+
+        try:
+            async for chunk in buffer.start():
+                yield chunk
+        finally:
+            await buffer.signal_end()
+            consume_task.cancel()
+
+    def call_api(self, prompt: str, max_retries: int = 2) -> str:
+        """使用适配器调用API（同步）"""
+        import asyncio
+
+        return asyncio.run(self.call_async_api(prompt, max_retries))
+
+    def call_stream_api(self, prompt: str, max_retries: int = 2):
+        """使用适配器调用流式API（同步）"""
+        import asyncio
+        from queue import Queue
+        import threading
+
+        q = Queue()
+        stop_event = object()
+
+        async def producer():
+            try:
+                async for chunk in self.call_async_stream_api(prompt, max_retries):
+                    q.put(chunk)
+            except Exception as e:
+                q.put(e)
+            finally:
+                q.put(stop_event)
+
+        def worker():
+            asyncio.run(producer())
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+        while True:
+            item = q.get()
+            if item is stop_event:
+                break
+            if isinstance(item, Exception):
+                raise item
+            yield item
+
+    async def _consume_stream(self, prompt: str, max_retries: int):
+        """消费流式响应"""
+        async for chunk in self.call_async_stream_api(prompt, max_retries):
+            yield chunk
+
+
 class ProviderFactory:
     """AI提供商工厂类"""
 
@@ -677,6 +861,7 @@ class ProviderFactory:
         "deepseek": CustomProvider,
         "dashscope": CustomProvider,
         "custom": CustomProvider,
+        "adapter": AdapterAIProvider,
     }
 
     @staticmethod
@@ -1346,6 +1531,15 @@ class AIManager:
     def get_default_config(self, provider_type: str) -> Dict[str, Any]:
         """获取默认模型配置"""
         return self.DEFAULT_CONFIGS.get(provider_type, self.DEFAULT_CONFIGS["openai"])
+
+    def set_idle_action_callback(self, callback: Optional[Callable[[], None]]) -> None:
+        """设置空闲动作回调函数
+        
+        Args:
+            callback: 回调函数，无参数，无返回值
+        """
+        if self._provider and hasattr(self._provider, 'set_idle_action_callback'):
+            self._provider.set_idle_action_callback(callback)
 
     @staticmethod
     def get_supported_providers() -> list:

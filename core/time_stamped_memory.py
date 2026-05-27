@@ -253,8 +253,4 @@ def build_time_aware_system_prompt(base_prompt: str, memory_vars: Dict[str, Any]
         prompt_parts.append("\nRecent conversation summary:")
         prompt_parts.append(memory_vars["recent_summary"])
     
-    if memory_vars.get("context_window"):
-        prompt_parts.append("\nDialogue history:")
-        prompt_parts.append(memory_vars["context_window"])
-    
     return "\n".join(prompt_parts)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -439,3 +441,66 @@ class DialogueManager:
         同步对话历史到记忆系统（空实现，保持兼容性）
         """
         pass
+
+    def _get_history_file_path(self) -> str:
+        """
+        获取对话历史保存文件路径
+        """
+        if os.name == 'nt':
+            app_data = os.getenv("APPDATA") or os.path.expanduser("~")
+            history_dir = os.path.join(app_data, "VivianDeskpet", "history")
+        else:
+            history_dir = os.path.join(
+                os.path.expanduser("~"), ".vivian_deskpet", "history"
+            )
+        os.makedirs(history_dir, exist_ok=True)
+        return os.path.join(history_dir, "dialogue_history.json")
+
+    def save_history(self, max_entries: int = 24) -> None:
+        """
+        保存对话历史到文件
+        
+        Args:
+            max_entries: 最大保存条目数，默认24条（12轮对话）
+        """
+        try:
+            history_data = []
+            # 只保存最近的 max_entries 条记录
+            recent_history = self.history[-max_entries:]
+            
+            for msg in recent_history:
+                history_data.append({
+                    "role": msg.role,
+                    "content": msg.content,
+                    "timestamp": msg.timestamp,
+                    "metadata": msg.metadata,
+                })
+            
+            file_path = self._get_history_file_path()
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(history_data, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"对话历史已保存到 {file_path}，共 {len(history_data)} 条")
+        except Exception as e:
+            logger.error(f"保存对话历史失败: {e}", exc_info=True)
+
+    def load_history(self) -> None:
+        """
+        从文件加载对话历史
+        """
+        try:
+            file_path = self._get_history_file_path()
+            if not os.path.exists(file_path):
+                logger.debug(f"对话历史文件不存在: {file_path}")
+                return
+            
+            with open(file_path, 'r', encoding='utf-8') as f:
+                history_data = json.load(f)
+            
+            for item in history_data:
+                # 使用 from_data 方法创建 History 对象
+                self.history.append(History.from_data(item))
+            
+            logger.info(f"从 {file_path} 加载了 {len(history_data)} 条对话历史")
+        except Exception as e:
+            logger.error(f"加载对话历史失败: {e}", exc_info=True)

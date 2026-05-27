@@ -1012,6 +1012,7 @@ class DeskpetMainWindow(QMainWindow):
 
         try:
             self.ai_manager = AIManager(ai_config)
+            self._setup_idle_action_callback()
             logger.debug("AIManager 初始化完成")
         except Exception as e:
             logger.error(f"AIManager 初始化失败: {e}")
@@ -1042,6 +1043,23 @@ class DeskpetMainWindow(QMainWindow):
             logger.error(f"Scheduler 初始化失败: {e}")
 
         logger.info("所有 managers 初始化完成")
+
+    def _setup_idle_action_callback(self):
+        """设置AI空闲动作回调"""
+        import random
+        
+        def on_idle_action():
+            try:
+                if hasattr(self, 'expression_manager') and self.expression_manager:
+                    expressions = ["shy", "eye_roll", "umbrella_close"]
+                    expr = random.choice(expressions)
+                    self.expression_manager.set_expression(expr, duration_ms=2000)
+                    logger.debug(f"[IdleAction] Triggered expression: {expr}")
+            except Exception as e:
+                logger.debug(f"[IdleAction] Failed to trigger expression: {e}")
+        
+        if hasattr(self, 'ai_manager') and self.ai_manager:
+            self.ai_manager.set_idle_action_callback(on_idle_action)
 
     def _on_tts_mouth_open(self, value: float):
         if hasattr(self.live2d_widget, "target_mouth_open"):
@@ -2481,6 +2499,12 @@ class DeskpetMainWindow(QMainWindow):
                 logger.info("AIWorker线程已终止")
 
             if hasattr(self, "brain"):
+                if hasattr(self.brain, "dialogue_manager"):
+                    try:
+                        self.brain.dialogue_manager.save_history(max_entries=24)
+                        logger.info("对话历史已保存")
+                    except Exception as e:
+                        logger.error(f"保存对话历史失败: {e}")
                 if hasattr(self.brain, "memory_manager"):
                     pass
         except Exception as e:
