@@ -1,5 +1,5 @@
 """
-Tool Call Manager V2 - Uses the new tool system
+Tool Call Manager - Tool system implementation
 
 Core Features:
 - Manage all available tools
@@ -27,6 +27,7 @@ from core.tools.v2 import (
     ExecutionResult,
     get_tool_system,
 )
+from .execution import execute_tool_use
 
 
 class ToolCallStatus(Enum):
@@ -89,12 +90,7 @@ class ToolListTool:
 
     def _load_definition_loader(self):
         """Load tool definition loader for dynamic tool loading from Markdown"""
-        try:
-            from core.tools.tool_definition_loader import get_tool_loader
-            self._definition_loader = get_tool_loader()
-            logger.info("[ToolListTool] Tool definition loader initialized")
-        except Exception as e:
-            logger.warning(f"[ToolListTool] Failed to load tool definition loader: {e}")
+        logger.info("[ToolListTool] Tool definition loader is deprecated, using built-in tools only")
 
     def load_from_md(self, file_path: str) -> bool:
         """
@@ -215,9 +211,9 @@ class ToolListTool:
         return self.get_tools_for_ai()
 
 
-class ToolCallManagerV2:
+class ToolCallManager:
     """
-    Tool Call Manager V2
+    Tool Call Manager
     
     Responsible for:
     1. Managing tool list
@@ -278,8 +274,8 @@ class ToolCallManagerV2:
             logger.error(f"[ToolCallManagerV2] Failed to check tool parameters: {e}")
             return True
 
-    def get_system_prompt(self) -> str:
-        """Get system prompt with tool information"""
+    def get_system_prompt(self, user_input: str = "") -> str:
+        """Get system prompt with tool information - optimized for token efficiency"""
         if self._tool_list_tool is None:
             return "Tool system not initialized"
 
@@ -287,25 +283,13 @@ class ToolCallManagerV2:
 
         return (
             f"{tools_list}\n\n"
-            "## Important: Tool Usage Instructions\n"
-            "WARNING: When user requests system operations (opening apps, visiting websites, searching files, etc.), you MUST return a tool call!\n"
-            "WARNING: Saying you will do something without calling the tool = user sees NO actual result!\n\n"
-            "## Response Format Requirements\n"
-            "You MUST output ONLY valid JSON, no other text before or after.\n\n"
+            "## Tool Usage\n"
+            "Use tools for system operations. MUST return tool call JSON for actions like opening apps/files/urls.\n\n"
             "## Output Format (JSON Only)\n"
-            "**Streaming Output**: The \"text\" field is displayed in real-time. ALWAYS include text field for better user experience!\n\n"
-            "Format 1 - Chat:\n"
-            "{\"text\": \"Your text response\", \"motion\": \"idle\", \"expression\": \"\", \"importance_user\": 0.5}\n\n"
-            "Format 2 - Tool Call:\n"
-            "{\"text\": \"Explanation for user\", \"tool\": \"tool_name\", \"arguments\": {\"param_name\": \"param_value\"}}\n\n"
-            "Format 3 - Multiple Parallel Tools:\n"
-            "[{\"text\": \"Opening apps\", \"tool\": \"open_application\", \"arguments\": {\"app_path\": \"notepad.exe\"}}, {\"tool\": \"open_url\", \"arguments\": {\"url\": \"https://baidu.com\"}}]\n\n"
-            "Example:\n"
-            "{\"text\": \"Sure, opening notepad for you~\", \"tool\": \"open_application\", \"arguments\": {\"app_path\": \"notepad.exe\"}}\n\n"
-            "## Important Notes\n"
-            "1. text field MUST be placed FIRST for streaming display!\n"
-            "2. Include text field even when calling tools - it improves UX!\n"
-            "3. Language Requirement: You MUST respond in the SAME LANGUAGE as the user's message."
+            "Chat: {\"text\":\"reply\",\"motion\":\"idle\",\"expression\":\"\",\"importance_user\":0.5}\n"
+            "Tool: {\"text\":\"Explanation\",\"tool\":\"name\",\"arguments\":{\"param\":\"value\"}}\n"
+            "Multi: [{\"tool\":\"t1\",...},{\"tool\":\"t2\",...}]\n\n"
+            "Note: Same language as user, text field first for streaming."
         )
 
     _TOOL_ALIASES = {
@@ -473,29 +457,37 @@ class ToolCallManagerV2:
             ctx = permission_context or self._permission_context
             logger.info(f"[ToolCallManagerV2] Executing tool: {tool_name}, args: {arguments}, permission context: {ctx}")
 
-            result = await self._tool_system.execute_tool(
-                tool_name=tool_name,
-                input_data=arguments,
+            tool_use_context = ToolUseContext(
                 permission_context=ctx,
+                tools=self._tool_system,
             )
 
+            result = await execute_tool_use(
+                tool_name=tool_name,
+                arguments=arguments,
+                tool_system=self._tool_system,
+                context=tool_use_context,
+            )
+
+            requires_confirmation = "需要用户确认" in str(result.data)
+            
             return ToolCallResult(
-                success=result.success,
-                result=result.result,
+                success=True,
+                result=result.data,
                 tool_name=tool_name,
                 tool_call_id=tool_call_id,
-                error=result.error,
-                requires_confirmation="permission" in str(result.error).lower() if result.error else False,
+                error=None,
+                requires_confirmation=requires_confirmation,
             )
 
         except Exception as e:
-            logger.error(f"[ToolCallManagerV2] Failed to execute tool {tool_name}: {e}")
+            logger.error(f"[ToolCallManagerV2] Unexpected error executing tool {tool_name}: {e}", exc_info=True)
             return ToolCallResult(
                 success=False,
                 result=None,
                 tool_name=tool_name,
                 tool_call_id=tool_call_id,
-                error=str(e)
+                error=f"工具执行发生意外错误: {str(e)}"
             )
 
     async def _execute_non_blocking_tool(
@@ -850,22 +842,22 @@ If you need to continue operations, please call the next tool.
         return results
 
 
-_tool_call_manager_v2: Optional[ToolCallManagerV2] = None
+_tool_call_manager: Optional[ToolCallManager] = None
 
 
-def get_tool_call_manager_v2() -> ToolCallManagerV2:
-    """Get ToolCallManagerV2 singleton"""
-    global _tool_call_manager_v2
-    if _tool_call_manager_v2 is None:
-        _tool_call_manager_v2 = ToolCallManagerV2()
-    return _tool_call_manager_v2
+def get_tool_call_manager() -> ToolCallManager:
+    """Get ToolCallManager singleton"""
+    global _tool_call_manager
+    if _tool_call_manager is None:
+        _tool_call_manager = ToolCallManager()
+    return _tool_call_manager
 
 
-def init_tool_call_manager_v2(
+def init_tool_call_manager(
     tool_system: Optional[ToolSystem] = None,
     permission_context: Optional[PermissionContext] = None,
-) -> ToolCallManagerV2:
-    """Initialize ToolCallManagerV2"""
-    global _tool_call_manager_v2
-    _tool_call_manager_v2 = ToolCallManagerV2(tool_system, permission_context)
-    return _tool_call_manager_v2
+) -> ToolCallManager:
+    """Initialize ToolCallManager"""
+    global _tool_call_manager
+    _tool_call_manager = ToolCallManager(tool_system, permission_context)
+    return _tool_call_manager

@@ -50,16 +50,19 @@ from PyQt5.QtCore import QThread, pyqtSignal, QThreadPool, QRunnable, QObject, p
 
 import concurrent.futures
 from functools import wraps
+import threading
 
 _ai_thread_pool = None
+_ai_thread_pool_lock = threading.Lock()
 
 def get_ai_thread_pool(max_workers=2):
     global _ai_thread_pool
-    if _ai_thread_pool is None:
-        _ai_thread_pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=max_workers,
-            thread_name_prefix="AIWorker"
-        )
+    with _ai_thread_pool_lock:
+        if _ai_thread_pool is None:
+            _ai_thread_pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="AIWorker"
+            )
     return _ai_thread_pool
 
 def ai_async(func):
@@ -75,6 +78,8 @@ def ai_async(func):
 from core.ai_manager import AIManager
 from core.brain import Brain
 from core.pet_controller import PetController
+from core.pet_status import get_pet_status_manager
+from core.diary_system import get_diary_system
 from engine.animation_manager import AnimationManager
 from engine.expression_manager import ExpressionManager
 from engine.resource_loader import ResourceLoader
@@ -98,11 +103,8 @@ class AIWorkerSignals(QObject):
     thinking_signal = pyqtSignal(bool)  # 思考状态信号，True表示开始思考，False表示结束
 
 class AIWorker(QRunnable):
-    """后台工作者，负责与Brain通信，避免阻塞主界面 - 优化版"""
+    """后台工作者：采用单任务独立 Loop 隔离，彻底解决多线程 run_until_complete 冲突"""
 
-    # 共享事件循环，避免重复创建
-    _shared_loop = None
-    
     def __init__(self, brain, user_input):
         super().__init__()
         self.brain = brain
@@ -111,21 +113,19 @@ class AIWorker(QRunnable):
         self._is_cancelled = False
         self._chunk_buffer = []
         self._chunk_flush_threshold = 1
-        self.setAutoDelete(True)  # 任务完成后自动删除
+        self.setAutoDelete(True)
 
     @pyqtSlot()
     def run(self):
-        # 使用全局共享事件循环
-        if AIWorker._shared_loop is None:
-            AIWorker._shared_loop = asyncio.new_event_loop()
-        loop = AIWorker._shared_loop
-        asyncio.set_event_loop(loop)
-
+        # 每次执行创建一个局部的、完全线程隔离的事件循环
+        local_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(local_loop)
         try:
             # 发送开始思考信号
             self.signals.thinking_signal.emit(True)
             
-            response_data = loop.run_until_complete(
+            # 安全地在隔离环境内运行流式思考任务
+            response_data = local_loop.run_until_complete(
                 self.brain.athink(
                     self.user_input,
                     stream=True,
@@ -164,7 +164,7 @@ class AIWorker(QRunnable):
             # 发送结束思考信号
             self.signals.thinking_signal.emit(False)
             self.brain.is_thinking = False
-            # 不关闭事件循环，复用
+            local_loop.close()  # 显式关闭，释放局部套接字及资源
 
     def _emit_stream_chunk(self, chunk):
         if chunk and not self._is_cancelled:
@@ -1042,6 +1042,32 @@ class DeskpetMainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Scheduler 初始化失败: {e}")
 
+        # 初始化心情状态系统
+        try:
+            self.pet_status_manager = get_pet_status_manager()
+            self.pet_status_manager.set_callback(self._on_pet_status_change)
+            logger.debug("PetStatusManager 初始化完成")
+        except Exception as e:
+            logger.error(f"PetStatusManager 初始化失败: {e}")
+
+        # 初始化日记系统
+        try:
+            self.diary_system = get_diary_system()
+            self.diary_system.set_dependencies(
+                ai_manager=self.ai_manager,
+                status_manager=self.pet_status_manager,
+                memory_manager=self.brain.memory_manager if hasattr(self.brain, 'memory_manager') else None
+            )
+            self.diary_system.set_callback(self._on_diary_created)
+            logger.debug("DiarySystem 初始化完成")
+        except Exception as e:
+            logger.error(f"DiarySystem 初始化失败: {e}")
+
+        # 将状态管理器设置到AI管理器
+        if hasattr(self, 'ai_manager') and hasattr(self, 'pet_status_manager'):
+            self.ai_manager.set_status_manager(self.pet_status_manager)
+            logger.debug("状态管理器已关联到AI管理器")
+
         logger.info("所有 managers 初始化完成")
 
     def _setup_idle_action_callback(self):
@@ -1064,6 +1090,32 @@ class DeskpetMainWindow(QMainWindow):
     def _on_tts_mouth_open(self, value: float):
         if hasattr(self.live2d_widget, "target_mouth_open"):
             self.live2d_widget.target_mouth_open = value
+
+    def _on_pet_status_change(self, event_data):
+        """处理宠物状态变化事件"""
+        event_type = event_data.get("type")
+        
+        if event_type == "action":
+            action = event_data.get("action")
+            expression = event_data.get("expression")
+            
+            if expression and hasattr(self, 'expression_manager'):
+                self.expression_manager.set_expression(expression, duration_ms=2000)
+                logger.debug(f"[_on_pet_status_change] 设置表情: {expression}")
+            
+            if action:
+                logger.debug(f"[_on_pet_status_change] 收到动作指令: {action}")
+
+    def _on_diary_created(self, event_data):
+        """处理日记创建事件"""
+        event_type = event_data.get("type")
+        
+        if event_type == "diary_created":
+            entry = event_data.get("entry")
+            if entry:
+                date = entry.get("date")
+                logger.info(f"[_on_diary_created] 新日记已创建: {date}")
+                ToastNotification.show_notification("📝 薇薇安写了一篇新日记！", self)
 
     def _on_scheduler_event(self, event_data: dict):
         event_type = event_data.get("type")
@@ -1221,6 +1273,10 @@ class DeskpetMainWindow(QMainWindow):
                     self.brain.local_proactive_service.on_drag_start()
                 
                 self.live2d_widget.handle_click(widget_pos)
+                
+                # 更新心情状态
+                if hasattr(self, 'pet_status_manager'):
+                    self.pet_status_manager.record_click()
             else:
                 hwnd = win32gui.GetParent(self.winId()) if self.winId() else 0
                 if hwnd:
@@ -1569,6 +1625,10 @@ class DeskpetMainWindow(QMainWindow):
             if hasattr(self, 'brain') and hasattr(self.brain, 'local_proactive_service') and self.brain.local_proactive_service:
                 self.brain.local_proactive_service.on_user_input()
 
+            # 记录用户交互到心情状态系统
+            if hasattr(self, 'pet_status_manager'):
+                self.pet_status_manager.record_interaction(user_input)
+
             if hasattr(self, "_pending_user_input"):
                 delattr(self, "_pending_user_input")
 
@@ -1606,11 +1666,14 @@ class DeskpetMainWindow(QMainWindow):
             
             if not hasattr(self, '_active_workers'):
                 self._active_workers = []
-            self._active_workers.append(worker)
+                self._active_workers_lock = threading.Lock()
+            with self._active_workers_lock:
+                self._active_workers.append(worker)
             
             def cleanup_worker():
-                if worker in self._active_workers:
-                    self._active_workers.remove(worker)
+                with self._active_workers_lock:
+                    if worker in self._active_workers:
+                        self._active_workers.remove(worker)
             worker.signals.response_signal.connect(cleanup_worker)
             
             if not hasattr(self, '_ai_thread_pool'):
@@ -1882,8 +1945,16 @@ class DeskpetMainWindow(QMainWindow):
                 self._stream_update_direct(chunk)
             return
 
-        text = response_data.get("text", "嗯...让我想想...")
+        text = response_data.get("text", "Hmm... let me think...")
         logger.info(f"[_on_ai_response_from_worker] 处理最终响应，text长度: {len(text)}")
+        
+        # 解析AI响应中的心情状态命令
+        if hasattr(self, 'pet_status_manager'):
+            text, command_data = self.pet_status_manager.parse_llm_command(text)
+            if command_data:
+                self.pet_status_manager.apply_command(command_data)
+                logger.debug(f"[_on_ai_response_from_worker] 已解析并应用命令: {command_data}")
+        
         ai_response = AIResponse(
             text=text,
             motion=response_data.get("motion", "idle"),
@@ -2490,6 +2561,26 @@ class DeskpetMainWindow(QMainWindow):
             logger.info("窗口配置已保存")
         except Exception as e:
             logger.error(f"保存数据失败: {e}")
+
+        # 关闭心情状态管理器
+        if hasattr(self, 'pet_status_manager'):
+            try:
+                self.pet_status_manager.shutdown()
+                logger.info("PetStatusManager 已关闭")
+            except Exception as e:
+                logger.error(f"关闭PetStatusManager失败: {e}")
+
+        logger.info("关闭全局HTTP连接池...")
+        try:
+            from core.ai_manager import close_global_sessions
+            import asyncio
+            # 创建临时事件循环来执行异步关闭操作
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(close_global_sessions())
+            loop.close()
+            logger.info("全局HTTP连接池已关闭")
+        except Exception as e:
+            logger.error(f"关闭HTTP连接池失败: {e}")
 
         logger.info("终止后台线程...")
         try:

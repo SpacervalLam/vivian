@@ -41,7 +41,7 @@ class MemoryExpirationRule:
 
 @dataclass
 class MemoryRetentionPolicy:
-    """记忆保留策略（参考ClaudeCode的设计）"""
+    """记忆保留策略"""
     # 永不删除的内容
     KEEP_ALWAYS = {
         "user_preferences", "user_identity", "important_events"
@@ -319,7 +319,7 @@ class VectorStoreAdapter(SimplifiedMemoryStore):
             
             # 初始化嵌入模型
             try:
-                from sentence_transformers import SentenceTransformer
+                from sentence_transformers import SentenceTransformer  # type: ignore
                 self._embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
             except:
                 logger.warning("SentenceTransformer not available, using simple embedding")
@@ -351,6 +351,7 @@ class VectorStoreAdapter(SimplifiedMemoryStore):
                 )
             elif self.store_type == StorageType.FAISS:
                 import numpy as np
+                import faiss  # type: ignore
                 self._vector_store.add(np.array([embedding]))
                 faiss.write_index(self._vector_store, self._index_path)
             

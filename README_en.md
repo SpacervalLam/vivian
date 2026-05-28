@@ -8,47 +8,59 @@
 
 ## Language Versions
 
-- [简体中文](README_zh.md)
-- [English](README_en.md)
+- [简体中文](README_zh.md) | [English](README_en.md)
 
 ---
 
-## 🌟 Project Highlights
+## 🌟 Features
 
-- 🎨 **Live2D Animated Character** - High-quality 2D animation with rich expressions and actions
-- 🤖 **AI Dialogue System** - Local + cloud AI models with context understanding and memory
-- 🔊 **Voice Interaction** - Speech recognition and synthesis for natural voice communication
-- 🎯 **Proactive Interaction** - Hourly greetings, teasing feedback, idle greetings, and intelligent proactive interactions
-- 🛠️ **Tool Calling** - Rich system tools to help you perform various operations
-- 📝 **Memory System** - Long-term memory management for personalized dialogue experiences
-- 🚀 **Performance Optimization** - Zero-copy streaming, parallel processing, connection pooling
+### 🎨 Core Features
+- **Live2D Animation** - High-quality 2D animation with rich expressions
+- **AI Dialogue** - Multiple AI models with context understanding
+- **Voice Interaction** - Speech recognition and synthesis
+
+### 🎯 Proactive Interaction
+- **Hourly Greetings** - Reminds you to take breaks
+- **Emotional Support** - Detects and comforts negative emotions
+- **Random Actions** - Periodically shows cute expressions
+
+### 📝 Memory System
+- **Short-term** - Recent conversation history for context
+- **Mid-term** - Session summaries with vector retrieval
+- **Long-term** - Extracted facts and knowledge storage
+
+### 💖 Mood System
+- **Happiness** - Affects response positivity
+- **Energy** - Affects response length and activity
+- **Intimacy** - Affects conversation closeness
+- **Boredom** - Increases with prolonged inactivity
+
+### 📔 Diary System
+- **Auto Generation** - Daily automatic summarization
+- **Smart Summary** - Extracts key events and mood changes
+- **Manual Entry** - Supports manual diary entries
+- **Data Export** - Export diary data
 
 ---
 
 ## 🚀 Quick Start
 
-### System Requirements
-
+### Requirements
 - Python 3.8+
-- Windows 10/11 (recommended)
-- At least 4GB RAM
-- GPU with OpenGL 3.0+ support
+- Windows 10/11
+- 4GB+ RAM
+- OpenGL 3.0+ compatible GPU
 
-### Installation Steps
-
-1. **Clone the repository**
+### Installation
 ```bash
+# Clone repository
 git clone https://github.com/SpacervalLam/vivian.git
 cd vivian
-```
 
-2. **Install dependencies**
-```bash
+# Install dependencies
 pip install -r requirements.txt
-```
 
-3. **Run the application**
-```bash
+# Run application
 python main.py
 ```
 
@@ -57,61 +69,62 @@ python main.py
 ## 🎮 Usage
 
 ### Basic Operations
-
-- **Click Interaction**: Click Vivian to wake her up and trigger different expressions and actions
-- **Drag to Move**: Hold left mouse button and drag to move Vivian's position
-- **Right-click Menu**: Right-click to show operation menu
+| Action | Function |
+|--------|----------|
+| Click | Trigger expressions/actions |
+| Double-click | Open quick chat |
+| Drag | Move position |
+| Right-click | Show menu |
 
 ### Keyboard Shortcuts
-
 | Shortcut | Function |
 |----------|----------|
-| Ctrl+Shift+A | Open dialogue input box |
-| Triple-click Vivian | Open dialogue input box |
+| Ctrl+Shift+A | Open dialogue input |
+| Triple-click | Open dialogue input |
 
 ### System Tools
-
-Vivian can perform the following system operations:
-
-- 🖥️ **Application Control**: Start/close applications
-- 📁 **File Management**: Open folders, search files, copy/move/delete files
-- 🖼️ **Desktop Operations**: Set wallpaper, take screenshots
-- 💻 **Window Control**: Minimize/maximize/close windows
-- 📋 **Clipboard**: Get/set clipboard content
-- ⏰ **Scheduled Tasks**: Set reminders and scheduled executions
-
-### Proactive Interactions
-
-Vivian will proactively interact with you in the following situations:
-
-- **Hourly Greetings**: Reminds you to take a break every hour
-- **Idle Greetings**: Greets you when idle for a long time
-- **Emotional Support**: Comforts you when detecting negative emotions
-- **Random Actions**: Shows cute expressions and actions periodically
+- 🖥️ App Control - Start/close applications
+- 📁 File Management - Open folders, search files
+- 🖼️ Desktop Operations - Set wallpaper, take screenshots
+- 💻 Window Control - Minimize/maximize/close
+- 📋 Clipboard - Get/set clipboard content
+- ⏰ Scheduled Tasks - Set reminders
 
 ---
 
-## 🧠 Memory System
+## 💖 Mood System
 
-### Memory Types
+### Status Types
+| Status | Condition | Behavior |
+|--------|-----------|----------|
+| 😊 Happy | happiness>70, energy>50 | Positive and lively |
+| 🎉 Excited | happiness>80, energy>70 | Very active |
+| 😴 Tired | energy<30 | Short and lazy responses |
+| 😴 Sleepy | energy<20, night time | May fall asleep |
+| 😐 Bored | boredom>70 | Proactive interaction |
+| 😢 Sad | happiness<30 | Low mood |
+| 😠 Angry | happiness<20 | Cold responses |
 
-1. **Short-term Memory**: Recent conversation history for context understanding
-2. **Long-term Memory**: Important information stored via semantic retrieval
-3. **Sensory Memory**: Environment perception and interaction history
+---
 
-### Memory Management
+## 📔 Diary System
 
-- **Importance Evaluation**: Automatically evaluates memory importance based on content
-- **Time Decay**: Memories gradually fade over time
-- **Intelligent Retrieval**: Retrieve related memories based on semantic similarity
+### Generation Methods
+1. **Scheduled** - Auto-generate at fixed times
+2. **Smart Trigger** - Auto-generate based on interaction
+3. **Manual** - User-created entries
+
+### Diary Content
+- Key events summary
+- Mood change curve
+- Interaction statistics
+- Keyword tags
 
 ---
 
 ## 🔌 Plugin System
 
-### Plugin Development
-
-The project supports plugin extensions. Develop custom features via SDK:
+Extend functionality with plugins:
 
 ```python
 from core.sdk.plugin import Plugin
@@ -121,46 +134,27 @@ class MyPlugin(Plugin):
         super().__init__("my_plugin", "My Plugin", "v1.0")
     
     def on_load(self, context):
-        self.context = context
         print("Plugin loaded")
     
     def on_message(self, message):
-        # Handle message
         return {"text": "Plugin response"}
 ```
-
-### Plugin Directory
-
-Plugins should be placed in the `data/plugins/` directory and registered in `data/config/plugins.yaml`.
 
 ---
 
 ## 📊 Performance Optimization
 
-### Key Optimization Strategies
-
-1. **Streaming Response**: Supports AI response streaming to reduce waiting time
-2. **Connection Pool Reuse**: HTTP session pool reuse reduces connection overhead
-3. **Request Caching**: Identical requests automatically use cached responses
-4. **Async Processing**: Background threads handle AI requests without blocking UI
-5. **Batch Updates**: UI updates are processed in batches to reduce rendering frequency
+- **Streaming Response** - Real-time AI response streaming
+- **Connection Pool** - HTTP session reuse
+- **Request Caching** - Cached identical requests
+- **Async Processing** - Background thread handling
 
 ---
 
 ## 📄 License
 
-This project uses the MIT License. See [LICENSE](LICENSE) for details.
+MIT License
 
 ---
 
-## 📞 Contact
-
-- Project: https://github.com/SpacervalLam/vivian
-- Issues: https://github.com/SpacervalLam/vivian/issues
-- Email: spacervallam@gmail.com
-
----
-
-> © 2026 SpacervalLam. All rights reserved.
-> 
-> Made with ❤️
+> © 2026 SpacervalLam | Made with ❤️

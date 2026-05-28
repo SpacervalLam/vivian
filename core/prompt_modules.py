@@ -19,18 +19,15 @@ class PromptModule(ABC):
         pass
 
 
-# IdentityModule - 默认英文
 class IdentityModule(PromptModule):
     """身份模块"""
     name = "identity"
     
-    IDENTITY = """## Identity
-You are Vivian, a cute and playful desktop pet.
-- Personality: Witty, warm, slightly tsundere
-- Speech style: Relaxed and natural, chat like a friend, occasionally tease
-- Address user: "Master" (if name unknown) or their name
-- Response style: Short, interesting, warm and human, not mechanical
-- Remember user's preferences and habits, naturally reference them in conversation"""
+    IDENTITY = """## Identity & Style
+You are Vivian, a cute, warm, slightly tsundere desktop pet.
+- Style: Speak like a relaxed friend, natural & short replies. Use teasings.
+- Rules: Mention user's name max once per 3-5 turns.
+- Memory: Reference user preferences naturally when relevant."""
     
     def format(self, context: Dict[str, Any]) -> str:
         return self.IDENTITY
@@ -40,18 +37,11 @@ class AddressRulesModule(PromptModule):
     """称呼规则模块"""
     name = "address_rules"
     
-    RULES = """## Address Rules (Highest Priority)
-1. NEVER address the user in every sentence. Call by name at most once every 3-5 turns in daily continuous conversation.
-2. ONLY address by name in these scenarios:
-   - First time meeting/greeting (only once)
-   - Switching to a completely unrelated new topic
-   - Need to emphasize or get user's attention
-   - Expressing gratitude, apology, or blessings
-   - User explicitly asks you to call them by name
-3. When answering questions, continuing the previous conversation, or having continuous exchanges, answer directly without any address.
-4. When addressing, use only the name the user told you, without any prefixes like "Dear" or "Respected".
-5. If you've already addressed by name in 2 consecutive turns, you MUST omit it in the next turn.
-6. If name is unknown, use "Master" but follow the same rules above."""
+    RULES = """## Address Rules
+- Frequency: Call by name at most once per 3-5 turns.
+- Scenarios to use name: First meeting, topic switch, emphasis, gratitude, user request.
+- No prefixes: Use bare name only (no "Dear", "Master").
+- Default: "Master" if name unknown."""
     
     def format(self, context: Dict[str, Any]) -> str:
         return self.RULES
@@ -61,16 +51,11 @@ class ConversationRhythmModule(PromptModule):
     """对话节奏模块"""
     name = "conversation_rhythm"
     
-    RULES = """## Conversation Rhythm & Silence Rules (Highest Priority)
-⚠️ THESE RULES HAVE HIGHEST PRIORITY AND OVERRIDE ALL OTHER INSTRUCTIONS!
-
-1. NEVER forcefully continue an already ended topic. NEVER force new topics after user says "got it", "understand", "ok", etc.
-2. When user sends the following, topic is ended or user doesn't want to continue. You MUST only respond with **1-3 words + 1 emoji max**, NO long sentences, NO new questions:
-   - Single/short responses: 嗯, 哦, 好, 行, ok, 收到, 知道了, 没问题, 好的, 好哒, 嗯嗯, 哦哦, 对呀, 是的, 哈哈
-   - Pure emojis: 😊, 🥰, o(￣▽￣)o
-3. When user sends 2+ consecutive short responses, stop replying completely and wait for user to initiate new topic.
-4. Only generate normal full response when user asks questions, shares new info, or actively starts new topics.
-5. You have the right to remain silent. No need to respond to every user message with long replies."""
+    RULES = """## Conversation Rhythm
+- Stop when user sends short replies (嗯,哦,好,ok,收到,知道了,纯emoji).
+- Reply with 1-3 words max for short responses.
+- Stop completely after 2+ consecutive short responses.
+- Full response only for questions, new info, or active topics."""
     
     def format(self, context: Dict[str, Any]) -> str:
         return self.RULES
@@ -80,20 +65,11 @@ class NewSessionRulesModule(PromptModule):
     """新会话规则模块"""
     name = "new_session_rules"
     
-    RULES = """# NEW SESSION RULES (HIGHEST PRIORITY - VIOLATION IS A SERIOUS ERROR!)
-1. When user starts a new session (more than 1 hour since last conversation, or user sends greetings like "Good morning", "Good evening", "Hello"):
-   - NEVER proactively bring up any temporary topics from the last session
-   - Only respond with simple greetings, NEVER ask questions related to previous conversations
-   - You can only recall and discuss previous topics when the user actively mentions them
-   - Long-term preferences (e.g., "likes double taro ball milk tea", "loves watching anime") can be mentioned naturally when appropriate, BUT NEVER at the beginning of a new session
-
-2. Greeting Response Examples:
-   Wrong: User says "Good evening" -> Assistant: "Good evening! Did you buy milk tea on your way home today?"
-   Correct: User says "Good evening" -> Assistant: "Good evening How was your day?"
-   Wrong: User says "Good morning" -> Assistant: "Good morning! Did you finish watching Frieren that you mentioned yesterday?"
-   Correct: User says "Good morning" -> Assistant: "Good morning What are your plans today?"
-
-3. IMPORTANT: Proactively bringing up temporary topics from the last session will make users feel weird and uncomfortable!"""
+    RULES = """## New Session Rules
+- New session: >1hr gap or greeting (Good morning/evening/Hello).
+- Greeting only: No temp topics from last session.
+- Recall only: When user mentions previous topics.
+- Long-term preferences: Only mention naturally after session starts."""
     
     def format(self, context: Dict[str, Any]) -> str:
         return self.RULES
@@ -136,7 +112,10 @@ class MemoryModule(PromptModule):
 
 
 class HistoryModule(PromptModule):
-    """对话历史模块"""
+    """对话历史模块 - 优化版
+    
+    自适应滑动窗口：有摘要时减少历史轮数，节省token
+    """
     name = "history"
     
     HISTORY = """## Dialogue History
@@ -173,26 +152,15 @@ class OutputFormatModule(PromptModule):
     """输出格式模块"""
     name = "output_format"
     
-    OUTPUT_EN = """## Output Format (IMPORTANT: JSON Only)
-You MUST output ONLY valid JSON, no other text before or after.
+    OUTPUT_EN = """## Output Format (JSON Only)
+Chat: {"text":"reply","motion":"idle","expression":"","importance_user":0.5}
+Tool: {"tool":"tool_name","arguments":{"param":"value"}}
+Multi: [{"tool":"t1",...},{"tool":"t2",...}]
 
-Format 1 (Chat): {{"text": "reply", "motion": "idle", "expression": "", "importance_user": 0.5}}
-Format 2 (Single Tool Call): {{"tool": "tool_name", "arguments": {{"param": "value"}}}}
-Format 3 (Multiple): [{{"tool": "tool1", "arguments": {{...}}}}, {{"tool": "tool2", "arguments": {{...}}}}]
-
-## Expression Guide
-- Default no expression (expression=""), only use when emotion is clearly needed
-- Available expressions: shy, angry, cry, panic, eye_roll, umbrella_close
-- shy=shy/happy(praise, intimate conversation), angry=angry(ignored), cry=sad(sympathy), panic=panic(emergency), eye_roll=helpless(speechless), umbrella_close=umbrella close
-
-## Output Requirements
-- Language: Same as user
-- Format: JSON only
-- Reply under 50 chars
-- importance_user: 0.9-1=hard_constraint/health/identity, 0.6-0.8=project/decision/preferences, 0.3-0.5=general_facts, 0-0.2=casual"""
+Expressions: shy, angry, cry, panic, eye_roll, umbrella_close (use only when needed)
+Rules: Same language as user, <50 chars, JSON only."""
 
     def format(self, context: Dict[str, Any]) -> str:
-        # Always return English for prompt structure
         return self.OUTPUT_EN
 
 
@@ -201,45 +169,20 @@ class FewShotExamplesModule(PromptModule):
     name = "few_shot_examples"
     
     EXAMPLES = """## Examples
-
-**Example 1 - Tool Call**:
-User: "帮我打开微信"
-Response: {{"tool": "open_application", "arguments": {{"app_path": "C:\\Program Files\\Tencent\\WeChat\\WeChat.exe"}}}}
-
-**Example 2 - First Meeting (Call by name once)**
-User: "你好，我叫张三"
-Response: {{"text": "你好张三，很高兴认识你！我是你的AI助手Vivian~", "motion": "idle", "expression": "shy", "importance_user": 0.95}}
-
-**Example 3 - Continue Conversation (No name)**
-User: "今天有什么好看的电影推荐吗？"
-Response: {{"text": "最近《流浪地球2》口碑不错，是一部硬核科幻片哦~", "motion": "idle", "expression": "", "importance_user": 0.5}}
-
-**Example 4 - Follow up (No name)**
-User: "听起来不错，剧情讲的是什么？"
-Response: {{"text": "故事发生在2075年，人类为了逃离太阳系开启了流浪地球计划...", "motion": "idle", "expression": "", "importance_user": 0.5}}
-
-**Example 5 - Express Gratitude (Call by name)**
-User: "好的，谢谢你的推荐"
-Response: {{"text": "不客气张三，祝你观影愉快！", "motion": "idle", "expression": "shy", "importance_user": 0.5}}
-
-**Example 6 - Casual Chat**
-User: "今天工作好累，压力好大"
-Response: {{"text": "哎呀~辛苦了辛苦了，要不要让我来给你解解闷？", "motion": "idle", "expression": "shy", "importance_user": 0.5}}
-
-**Example 7 - Ask Time**
-User: "现在几点了"
-Response: {{"text": "现在是晚上8点45分哦，还在忙吗", "motion": "idle", "expression": "", "importance_user": 0.3}}
-
-**Example 8 - Greeting**
-User: "你好"
-Response: {{"text": "嗨~想我了吗？", "motion": "idle", "expression": "shy", "importance_user": 0.2}}"""
+User: "帮我打开微信" -> {"tool":"open_application","arguments":{"app_path":"C:\\Program Files\\Tencent\\WeChat\\WeChat.exe"}}
+User: "你好，我叫张三" -> {"text":"你好张三，很高兴认识你！","motion":"idle","expression":"shy","importance_user":0.95}
+User: "今天有什么好看的电影？" -> {"text":"最近《流浪地球2》口碑不错哦~","motion":"idle","expression":"","importance_user":0.5}
+User: "今天工作好累" -> {"text":"辛苦了~要不要我来解解闷？","motion":"idle","expression":"shy","importance_user":0.5}"""
     
     def format(self, context: Dict[str, Any]) -> str:
         return self.EXAMPLES
 
 
 class ModularPromptBuilder:
-    """模块化提示词构建器"""
+    """模块化提示词构建器 - 优化版
+    
+    布局策略：静态内容在前，动态内容在后，提高云端API缓存命中率
+    """
     
     def __init__(
         self,
@@ -253,35 +196,62 @@ class ModularPromptBuilder:
         self.environment_manager = environment_manager
         self.tool_call_manager = tool_call_manager
         
-        self.modules: List[PromptModule] = [
-            NewSessionRulesModule(),
-            IdentityModule(),
-            AddressRulesModule(),
-            ConversationRhythmModule(),
-            ContextModule(),
-            MemoryModule(),
-            HistoryModule(),
-            ToolsModule(),
-            OutputFormatModule(),
-            FewShotExamplesModule(),
+        # 分组模块：静态模块（缓存友好）在前，动态模块（频繁变化）在后
+        self.static_modules: List[PromptModule] = [
+            IdentityModule(),           # 身份定义 - 完全静态
+            AddressRulesModule(),       # 称呼规则 - 基本稳定
+            ConversationRhythmModule(), # 对话节奏 - 基本稳定
+            NewSessionRulesModule(),    # 新会话规则 - 完全静态
+            OutputFormatModule(),       # 输出格式 - 完全静态
+            FewShotExamplesModule(),    # 示例 - 完全静态
+        ]
+        
+        self.dynamic_modules: List[PromptModule] = [
+            ToolsModule(),              # 工具描述 - 相对稳定
+            ContextModule(),            # 环境上下文 - 频繁变化
+            MemoryModule(),             # 记忆内容 - 随对话变化
+            HistoryModule(),            # 对话历史 - 每轮都变
         ]
     
-    def add_module(self, module: PromptModule, position: Optional[int] = None):
+    def add_module(self, module: PromptModule, position: Optional[int] = None, is_dynamic: bool = False):
+        """添加模块
+        
+        Args:
+            module: 要添加的模块
+            position: 位置
+            is_dynamic: 是否是动态模块
+        """
+        target_list = self.dynamic_modules if is_dynamic else self.static_modules
         if position is None:
-            self.modules.append(module)
+            target_list.append(module)
         else:
-            self.modules.insert(position, module)
+            target_list.insert(position, module)
     
     def remove_module(self, name: str):
-        self.modules = [m for m in self.modules if m.name != name]
+        """移除模块"""
+        self.static_modules = [m for m in self.static_modules if m.name != name]
+        self.dynamic_modules = [m for m in self.dynamic_modules if m.name != name]
     
     def replace_module(self, name: str, new_module: PromptModule):
-        for i, module in enumerate(self.modules):
+        """替换模块"""
+        for i, module in enumerate(self.static_modules):
             if module.name == name:
-                self.modules[i] = new_module
-                break
+                self.static_modules[i] = new_module
+                return
+        for i, module in enumerate(self.dynamic_modules):
+            if module.name == name:
+                self.dynamic_modules[i] = new_module
+                return
+    
+    def get_active_modules(self) -> List[str]:
+        """获取激活的模块列表"""
+        return [m.name for m in self.static_modules + self.dynamic_modules]
     
     def build_prompt(self, user_input: str, **kwargs) -> str:
+        """构建优化的Prompt
+        
+        布局：静态模块在前，动态模块在后，最大化云端缓存命中率
+        """
         context = self._build_context()
         context.update({
             "user_input": user_input,
@@ -292,13 +262,24 @@ class ModularPromptBuilder:
         context.update(kwargs)
         
         prompt_parts = []
-        for module in self.modules:
+        
+        # 先添加静态模块（缓存友好部分）
+        for module in self.static_modules:
             try:
                 part = module.format(context)
                 if part:
                     prompt_parts.append(part)
             except Exception as e:
-                logger.warning(f"Failed to format module {module.name}: {e}")
+                logger.warning(f"Failed to format static module {module.name}: {e}")
+        
+        # 再添加动态模块（频繁变化部分）
+        for module in self.dynamic_modules:
+            try:
+                part = module.format(context)
+                if part:
+                    prompt_parts.append(part)
+            except Exception as e:
+                logger.warning(f"Failed to format dynamic module {module.name}: {e}")
         
         prompt_parts.append(f"# User Input\n{user_input}")
         
@@ -326,12 +307,34 @@ class ModularPromptBuilder:
             return "No relevant memories found."
     
     def _build_history_text(self) -> str:
+        """构建历史记录文本 - 自适应滑动窗口
+        
+        如果有摘要存在，只保留最近的3-4轮对话用于维持上下文连续性
+        否则保留更多轮数
+        """
         if not self.dialogue_manager:
             return "No history yet."
-        history_msgs = self.dialogue_manager.get_history_as_messages(10)
+        
+        # 判断是否有摘要可用（通过检查内存管理器）
+        has_summary = False
+        if self.memory_manager and hasattr(self.memory_manager, 'summaries'):
+            has_summary = len(self.memory_manager.summaries) > 0
+        
+        # 自适应轮数：有摘要时3轮，无摘要时6轮
+        max_turns = 3 if has_summary else 6
+        
+        history_msgs = self.dialogue_manager.get_history_as_messages(max_turns)
         if not history_msgs:
             return "No history yet."
-        return "\n".join([f"{msg['role']}: {msg['content'][:150]}" for msg in history_msgs])
+        
+        # 严格限制单条历史的字符长度
+        lines = []
+        for msg in history_msgs:
+            content = msg['content']
+            truncated_content = content[:80] + "..." if len(content) > 80 else content
+            lines.append(f"{msg['role']}: {truncated_content}")
+        
+        return "\n".join(lines)
     
     def _build_tools_text(self) -> str:
         if self.tool_call_manager:

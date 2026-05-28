@@ -127,7 +127,6 @@ class PermissionContext:
     权限上下文
 
     包含所有权限检查所需的信息。
-    参考 ClaudeCode 的 ToolPermissionContext 设计。
     """
     mode: PermissionMode = PermissionMode.DEFAULT
     additional_working_directories: Dict[str, AdditionalWorkingDirectory] = field(default_factory=dict)

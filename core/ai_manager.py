@@ -75,6 +75,22 @@ async def get_httpx_async_client(http2: bool = True):
         )
     return _httpx_async_client
 
+async def close_global_sessions():
+    """优雅停机：安全关闭并释放全局 HTTP 异步长连接池"""
+    global _httpx_async_client, _httpx_client
+    
+    if _httpx_async_client is not None:
+        logger.info("[AIManager] 正在关闭全局 HTTP 异步长连接池...")
+        await _httpx_async_client.aclose()
+        _httpx_async_client = None
+    
+    if _httpx_client is not None:
+        logger.info("[AIManager] 正在关闭全局 HTTP 同步连接池...")
+        _httpx_client.close()
+        _httpx_client = None
+    
+    logger.info("[AIManager] 全局连接池已关闭")
+
 def timed_lru_cache(seconds: int, maxsize: int = 128):
     """带超时的LRU缓存装饰器"""
     def wrapper_cache(func):
@@ -358,7 +374,7 @@ class BaseAIProvider:
 
     def call_api(self, prompt: str, max_retries: int = 2) -> str:
         """使用SDK调用API（同步）"""
-        logger.info(f"[AIManager] API请求开始，模型: {self.model}，提示词长度: {len(prompt)}")
+        logger.debug(f"[AIManager] API请求开始，模型: {self.model}，提示词长度: {len(prompt)}")
         self._log_full_prompt_once(prompt)
         client = self._get_client()
         if not client:
@@ -391,7 +407,7 @@ class BaseAIProvider:
 
     def call_stream_api(self, prompt: str, max_retries: int = 2):
         """使用SDK调用流式API（同步）"""
-        logger.info(f"[AIManager] 流式API请求开始，模型: {self.model}，提示词长度: {len(prompt)}")
+        logger.debug(f"[AIManager] 流式API请求开始，模型: {self.model}，提示词长度: {len(prompt)}")
         self._log_full_prompt_once(prompt)
         client = self._get_client()
         if not client:
@@ -434,7 +450,7 @@ class BaseAIProvider:
 
     async def call_async_api(self, prompt: str, max_retries: int = 2) -> str:
         """使用SDK调用API（异步）"""
-        logger.info(f"[AIManager] 异步API请求开始，模型: {self.model}，提示词长度: {len(prompt)}")
+        logger.debug(f"[AIManager] 异步API请求开始，模型: {self.model}，提示词长度: {len(prompt)}")
         self._log_full_prompt_once(prompt)
         
         cached_response = self._get_cached_response(prompt)
@@ -477,7 +493,7 @@ class BaseAIProvider:
 
     async def call_async_stream_api(self, prompt: str, max_retries: int = 2):
         """使用SDK调用流式API（异步）"""
-        logger.info(f"[AIManager] 异步流式API请求开始，模型: {self.model}，提示词长度: {len(prompt)}")
+        logger.debug(f"[AIManager] 异步流式API请求开始，模型: {self.model}，提示词长度: {len(prompt)}")
         self._log_full_prompt_once(prompt)
         
         cached_response = self._get_cached_response(prompt)
@@ -721,7 +737,7 @@ class AdapterAIProvider(BaseAIProvider):
         from core.adapters.llm_adapters import UnifiedChatRequest
 
         model_name = self.config.get("model", "")
-        logger.info(f"[AdapterAIProvider] 异步API请求开始，模型: {model_name}，提示词长度: {len(prompt)}")
+        logger.debug(f"[AdapterAIProvider] 异步API请求开始，模型: {model_name}，提示词长度: {len(prompt)}")
 
         request = UnifiedChatRequest(
             model=model_name,
@@ -747,7 +763,7 @@ class AdapterAIProvider(BaseAIProvider):
         """使用适配器调用流式API（异步）"""
         from core.adapters.llm_adapters import UnifiedChatRequest
 
-        logger.info(f"[AdapterAIProvider] 异步流式API请求开始，提示词长度: {len(prompt)}")
+        logger.debug(f"[AdapterAIProvider] 异步流式API请求开始，提示词长度: {len(prompt)}")
 
         request = UnifiedChatRequest(
             model=self.config.get("model", ""),
@@ -966,9 +982,43 @@ class AIManager:
         self._conversation_history = [
             {
                 "role": "system",
-                "content": "You are Vivian, a cute and playful desktop pet. You have a lively and cheerful personality and prefer to respond in a short, playful tone. You also have system control capabilities and can perform various computer operations.\n\nWhen you need to perform a system operation, please strictly output in the specified JSON format, including type, content, and code fields. When it's just a normal chat, output in the ordinary chat JSON format.\n\nPlease keep your answers concise and interesting.",
+                "content": """You are Vivian, a cute and playful desktop pet. You have a lively and cheerful personality and prefer to respond in a short, playful tone. You also have system control capabilities and can perform various computer operations.
+
+When you need to perform a system operation, please strictly output in the specified JSON format, including type, content, and code fields. When it's just a normal chat, output in the ordinary chat JSON format.
+
+**Mood State System**: You can modify the pet's mood state through special tags. Add a `<|PET_COMMAND|>` tag block at the end of your response to update the state:
+
+<|PET_COMMAND|>
+{
+  "mood_update": {
+    "happiness": +3,
+    "intimacy": +2
+  },
+  "action": "wave",
+  "expression": "smile"
+}
+<|/PET_COMMAND|>
+
+**mood_update field description** (optional):
+- happiness: change in happiness level (-20 to +20)
+- energy: change in energy level (-20 to +20)
+- intimacy: change in intimacy level (-10 to +10)
+- boredom: change in boredom level (-20 to +20)
+
+**action field description** (optional):
+- Available actions: wave, nod, idle, bounce, cross_arms
+
+**expression field description** (optional):
+- Available expressions: shy, cry, angry, eye_roll, panic, umbrella_close
+
+Adjust mood state according to the conversation. Positive conversations increase happiness and intimacy, while negative conversations decrease happiness.
+
+Please keep your answers concise and interesting.""",
             }
         ]
+        
+        # 状态管理器引用
+        self._status_manager = None
 
         # 线程锁：保护对话历史以防在多线程场景（UI线程 + 后台worker）下并发读写
         self._history_lock = threading.Lock()
@@ -1055,8 +1105,13 @@ class AIManager:
 
         return {"is_valid": len(errors) == 0, "errors": errors}
 
+    def set_status_manager(self, status_manager):
+        """设置状态管理器引用"""
+        self._status_manager = status_manager
+        logger.info("[AIManager] 状态管理器已设置")
+
     def _build_complete_prompt(self, prompt: str) -> str:
-        """构建完整的prompt，包含对话历史（不包含系统消息）"""
+        """构建完整的prompt，包含对话历史和当前状态（不包含系统消息）"""
         full_prompt = ""
         with self._history_lock:
             for msg in self._conversation_history:
@@ -1065,9 +1120,26 @@ class AIManager:
                 if role == "system":
                     continue
                 full_prompt += f"{role}: {content}\n"
+        
+        # 动态注入当前状态
+        if self._status_manager:
+            try:
+                status_prompt = self._status_manager.get_status_prompt()
+                full_prompt += f"\n{status_prompt}\n\n"
+            except Exception as e:
+                logger.error(f"[AIManager] 获取状态提示词失败: {e}")
+        
         full_prompt += f"user: {prompt}\n"
         full_prompt += "assistant: "
         return full_prompt.strip()
+    
+    def parse_pet_command(self, response: str) -> tuple:
+        """解析LLM响应中的桌宠指令"""
+        from core.pet_status import PetStatusManager
+        
+        if self._status_manager:
+            return self._status_manager.parse_llm_command(response)
+        return response, None
 
     def _make_cache_key(self, prompt: str, use_history: bool, max_tokens: Optional[int]) -> str:
         """生成稳定的缓存键，使用SHA256对长prompt做哈希以避免内存/字典问题"""

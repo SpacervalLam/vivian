@@ -1,7 +1,6 @@
 """
-Vivian 工具系统 V2 - 完整功能版本
+Vivian 工具系统
 
-灵感来源：ClaudeCode 的工具系统设计
 特性：
 - 基于 Pydantic 的强类型 Schema 验证
 - 完整的权限上下文系统
@@ -68,14 +67,6 @@ from .ui import (
     MessageStatus,
     format_tool_result_for_display,
     format_progress_for_display,
-)
-from .compat import (
-    CompatibleToolManager,
-    V2ToolAdapter,
-    V1ToolAdapter,
-    migrate_to_v2,
-    create_compatible_tool,
-    get_compatible_tool_manager,
 )
 
 __all__ = [
@@ -157,11 +148,4 @@ __all__ = [
     "MessageStatus",
     "format_tool_result_for_display",
     "format_progress_for_display",
-    # Compatibility
-    "CompatibleToolManager",
-    "V2ToolAdapter",
-    "V1ToolAdapter",
-    "migrate_to_v2",
-    "create_compatible_tool",
-    "get_compatible_tool_manager",
 ]

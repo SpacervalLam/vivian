@@ -36,6 +36,27 @@ from core.semantic_memory import (
     get_hybrid_retriever,
 )
 
+from core.memory_config import (
+    DEFAULT_RETRIEVAL_K,
+    RETRIEVAL_EXPANSION_FACTOR,
+    SEMANTIC_SCORE_WEIGHT,
+    BM25_SCORE_WEIGHT,
+    IMPORTANCE_FACTOR,
+    RECENCY_FACTOR,
+    NAME_MEMORY_BOOST_SCORE,
+    DEFAULT_TOKEN_BUDGET,
+    SHORT_TERM_TOKEN_LIMIT,
+    MID_TERM_TOKEN_LIMIT,
+    MID_TERM_SUMMARY_THRESHOLD,
+    DEFAULT_DECAY_RATE,
+    DIALOGUE_DECAY_RATE,
+    DECAY_TYPE,
+    TOKEN_FLUSH_RATIO,
+    CHAT_HISTORY_TOKEN_RATIO,
+    NAME_KEYWORDS,
+    DEFAULT_MEMORY_BLOCKS,
+)
+
 
 class BaseRetriever(ABC):
     """检索器基类"""
@@ -145,7 +166,8 @@ class HybridRetriever(BaseRetriever):
 class MemorySelector:
     """记忆选择器"""
     
-    def __init__(self, memory_manager: 'MemoryManager', retriever: BaseRetriever, token_budget: int = 3000):
+    def __init__(self, memory_manager: 'MemoryManager', retriever: BaseRetriever, 
+                 token_budget: int = DEFAULT_TOKEN_BUDGET):
         self.memory_manager = memory_manager
         self.retriever = retriever
         self.token_budget = token_budget
@@ -156,8 +178,10 @@ class MemorySelector:
         self.semantic_store = get_semantic_store()
         self.hybrid_retriever = get_hybrid_retriever()
     
-    def select_memories(self, query: str, k: int = 8, filters: Optional[Dict[str, Any]] = None,
-                        include_short_term: bool = True, include_long_term: bool = True) -> List[Tuple[Memory, float]]:
+    def select_memories(self, query: str, k: int = DEFAULT_RETRIEVAL_K, 
+                        filters: Optional[Dict[str, Any]] = None,
+                        include_short_term: bool = True, 
+                        include_long_term: bool = True) -> List[Tuple[Memory, float]]:
         """选择相关记忆"""
         logger.debug(f"[select_memories] Query: '{query[:50]}...', k={k}")
         
@@ -177,49 +201,46 @@ class MemorySelector:
         
         self._sync_semantic_store(candidates)
         
-        semantic_results = self.hybrid_retriever.retrieve(query, k=k * 3)
+        semantic_results = self.hybrid_retriever.retrieve(query, k=k * RETRIEVAL_EXPANSION_FACTOR)
         logger.debug(f"[select_memories] Semantic results: {len(semantic_results)}")
         
-        bm25_results = self._get_bm25_results(query, candidates, k=k * 3)
+        bm25_results = self._get_bm25_results(query, candidates, k=k * RETRIEVAL_EXPANSION_FACTOR)
         logger.debug(f"[select_memories] BM25 results: {len(bm25_results)}")
         
-        name_keywords = ["中文名", "英文名", "名字", "叫我", "我是", "称呼我"]
-        if any(keyword in query for keyword in name_keywords):
+        if any(keyword in query for keyword in NAME_KEYWORDS):
             name_memories = self._find_name_memories(candidates)
             logger.debug(f"[select_memories] Found {len(name_memories)} name memories for name-related query")
             for mem in name_memories:
                 if mem not in [sem_mem for sem_mem, _ in semantic_results]:
-                    semantic_results.append((mem, 0.8))
+                    semantic_results.append((mem, NAME_MEMORY_BOOST_SCORE))
         
         scores: Dict[str, float] = {}
         
         for sem_mem, score in semantic_results:
-            scores[sem_mem.id] = score * 0.65
+            scores[sem_mem.id] = score * SEMANTIC_SCORE_WEIGHT
         
         if bm25_results:
             max_bm25 = max(score for _, score in bm25_results) or 1.0
             for memory, score in bm25_results:
                 normalized = score / max_bm25
-                scores[memory.id] = scores.get(memory.id, 0.0) + normalized * 0.35
+                scores[memory.id] = scores.get(memory.id, 0.0) + normalized * BM25_SCORE_WEIGHT
         
         ranked: List[Tuple[Memory, float]] = []
         now = datetime.datetime.now()
         
-        name_keywords = ["我是", "我的名字是", "叫我", "名字是", "称呼我", "英文名", "中文名"]
-        
         for memory in candidates:
             base = scores.get(memory.id, 0.0)
-            importance_factor = memory.importance * 0.1
+            importance_factor = memory.importance * IMPORTANCE_FACTOR
             age_hours = (now - memory.created_at).total_seconds() / 3600.0
             
-            is_name_memory = any(keyword in (memory.content or "") for keyword in name_keywords)
+            is_name_memory = any(keyword in (memory.content or "") for keyword in NAME_KEYWORDS)
             
             if is_name_memory:
                 recency_factor = 1.0
             else:
                 recency_factor = 1.0 / (1.0 + age_hours / 24.0)
             
-            final_score = base + importance_factor + recency_factor * 0.1
+            final_score = base + importance_factor + recency_factor * RECENCY_FACTOR
             ranked.append((memory, final_score))
         
         ranked.sort(key=lambda x: x[1], reverse=True)
@@ -256,13 +277,12 @@ class MemorySelector:
     
     def _find_name_memories(self, candidates: List[Memory]) -> List[Memory]:
         """查找包含名字信息的记忆"""
-        name_keywords = ["我是", "我的名字是", "叫我", "名字是", "称呼我", "英文名", "中文名"]
         name_memories = []
         seen_content = set()
         
         for mem in candidates:
             content = mem.content or ""
-            if any(keyword in content for keyword in name_keywords):
+            if any(keyword in content for keyword in NAME_KEYWORDS):
                 if content not in seen_content:
                     seen_content.add(content)
                     name_memories.append(mem)
@@ -420,18 +440,18 @@ class MemoryManager:
                             os.path.dirname(os.path.abspath(__file__))
                         )
                     
-                    self.token_limit = self.config.get("token_limit", 30000)
+                    self.token_limit = self.config.get("token_limit", SHORT_TERM_TOKEN_LIMIT)
                     self.token_flush_size = self.config.get(
-                        "token_flush_size", int(self.token_limit * 0.1)
+                        "token_flush_size", int(self.token_limit * TOKEN_FLUSH_RATIO)
                     )
                     self.chat_history_token_ratio = self.config.get(
-                        "chat_history_token_ratio", 0.7
+                        "chat_history_token_ratio", CHAT_HISTORY_TOKEN_RATIO
                     )
-                    self.decay_rate = self.config.get("decay_rate", 0.01)
+                    self.decay_rate = self.config.get("decay_rate", DEFAULT_DECAY_RATE)
                     self.decay_type = self.config.get(
-                        "decay_type", "exponential"
+                        "decay_type", DECAY_TYPE
                     )
-                    self.dialogue_decay_rate = self.config.get("dialogue_decay_rate", 0.02)
+                    self.dialogue_decay_rate = self.config.get("dialogue_decay_rate", DIALOGUE_DECAY_RATE)
                     self._dialogue_count_since_last_decay = 0
                     
                     user_data_dir = self._get_user_data_dir()

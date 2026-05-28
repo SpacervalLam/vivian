@@ -1,20 +1,19 @@
 """
 工具模块 - Tools
 
-包含工具调用管理和V2工具系统：
-1. tool_call_manager - 工具调用管理器
-2. v2 - V2工具系统
+工具系统
 """
 
-from .tool_call_manager import (
+from .tool_call_manager_v2 import (
     ToolCallManager,
     ToolCallStatus,
     ToolCall,
     ToolCallResult,
-    ToolListTool,
     get_tool_call_manager,
     init_tool_call_manager,
 )
+
+from .execution import execute_tool_use, execute_tool_call, run_tool_use
 
 from .v2 import (
     Tool,
@@ -37,10 +36,13 @@ __all__ = [
     "ToolCallStatus",
     "ToolCall",
     "ToolCallResult",
-    "ToolListTool",
     "get_tool_call_manager",
     "init_tool_call_manager",
-    # V2工具系统
+    # 工具执行流程
+    "execute_tool_use",
+    "execute_tool_call",
+    "run_tool_use",
+    # 工具系统
     "Tool",
     "ToolSystem",
     "ToolResult",

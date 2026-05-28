@@ -19,7 +19,7 @@ from core.memory_manager import MemoryManager
 from core.emotion_analyzer import EmotionAnalyzer
 from core.prompt_builder import PromptBuilder
 from core.command_handler import CommandHandler
-from core.tools.tool_call_manager import ToolCallManager
+from core.tools import ToolCallManager
 from core.json_processor import JSONProcessor
 from utils.environment_manager import EnvironmentManager
 from core.time_stamped_memory import TimeStampedMemory, build_time_aware_system_prompt
@@ -333,6 +333,7 @@ class BrainState(BaseModel):
     command_response: Optional[Dict[str, Any]] = Field(default=None, description="命令响应")
     
     system_prompt: str = Field(default="", description="系统提示词")
+    system_prompt_extension: str = Field(default="", description="系统提示词扩展（如心情状态注入）")
     memory_text: str = Field(default="", description="记忆文本")
     history_text: str = Field(default="", description="历史文本")
     context_text: str = Field(default="", description="上下文文本")
@@ -340,6 +341,7 @@ class BrainState(BaseModel):
     
     response_text: str = Field(default="", description="AI 响应文本")
     response_json: Optional[Dict] = Field(default=None, description="解析后的 JSON")
+    parsed_json: Optional[Dict] = Field(default=None, description="JSONProcessor 解析后的 JSON")
     tool_calls: List[Dict] = Field(default_factory=list, description="工具调用列表")
     tool_call_executed: bool = Field(default=False, description="工具调用是否已执行")
     
@@ -735,10 +737,10 @@ class PromptBuildingRunnable(VivianRunnable[BrainState, BrainState]):
                 input.memory_text = ""
             
             if self.dialogue_manager:
-                history_msgs = self.dialogue_manager.get_history_as_messages(10)
+                history_msgs = self.dialogue_manager.get_history_as_messages(5)
                 if history_msgs:
                     input.history_text = "\n".join([
-                        f"{msg['role']}: {msg['content'][:200]}"
+                        f"{msg['role']}: {msg['content'][:80]}"
                         for msg in history_msgs
                     ])
                 else:
@@ -870,10 +872,10 @@ class PromptBuildingRunnable(VivianRunnable[BrainState, BrainState]):
                 if self.dialogue_manager:
                     loop = asyncio.get_event_loop()
                     history_msgs = await loop.run_in_executor(
-                        None, lambda: self.dialogue_manager.get_history_as_messages(10)
+                        None, lambda: self.dialogue_manager.get_history_as_messages(5)
                     )
                     if history_msgs:
-                        return "\n".join([f"{msg['role']}: {msg['content'][:150]}" for msg in history_msgs])
+                        return "\n".join([f"{msg['role']}: {msg['content'][:80]}" for msg in history_msgs])
                 return ""
             
             async def build_context():
@@ -1361,6 +1363,69 @@ class MemorySavingRunnable(VivianRunnable[BrainState, BrainState]):
         return loop.run_until_complete(self.ainvoke(input, config, **kwargs))
 
 
+class MoodInjectionRunnable(RunnableSerializable[BrainState, BrainState]):
+    """流水线中间件：负责在 Prompt 生成前，将本地最新的宠物情绪数值泵入 Context"""
+    
+    def __init__(self, status_manager):
+        self.status_manager = status_manager
+
+    def invoke(self, brain_state: BrainState, config: Optional[RunnableConfig] = None, **kwargs) -> BrainState:
+        # 获取最新的前端展现状态字典
+        status_dict = self.status_manager.get_status_for_frontend()
+        mood = self.status_manager.status.mood
+        
+        # 动态拼接成系统提示词的一部分，增强 PromptBuilder
+        mood_context = (
+            f"\n[Current Pet Status]\n"
+            f"- State: {status_dict['state_label']}\n"
+            f"- Mood Values -> Happiness: {mood.happiness}/100, Energy: {mood.energy}/100, Intimacy: {mood.intimacy}/100, Boredom: {mood.boredom}/100\n"
+        )
+        # 注入到流水线的状态机中，供后续 Prompt 组装使用
+        brain_state.system_prompt_extension = mood_context
+        return brain_state
+
+    async def ainvoke(self, brain_state: BrainState, config: Optional[RunnableConfig] = None, **kwargs) -> BrainState:
+        return self.invoke(brain_state, config, **kwargs)
+
+
+class MoodExtractionRunnable(RunnableSerializable[BrainState, BrainState]):
+    """流水线中间件：负责在 LLM 响应生成后，提取 JSON 中规定的 status_update 并落实修改"""
+    
+    def __init__(self, status_manager):
+        self.status_manager = status_manager
+
+    def invoke(self, brain_state: BrainState, config: Optional[RunnableConfig] = None, **kwargs) -> BrainState:
+        # 假设 JSONProcessor 已将 LLM 返回的 JSON 转化为字典存放在 brain_state.parsed_json 中
+        parsed_res = getattr(brain_state, "parsed_json", {})
+        if parsed_res is None:
+            parsed_res = {}
+        
+        if isinstance(parsed_res, list) and len(parsed_res) > 0:
+            parsed_res = parsed_res[0]
+        
+        if isinstance(parsed_res, dict) and "status_update" in parsed_res:
+            update_data = parsed_res["status_update"]
+            # 增量调用本地修改接口
+            self.status_manager.update_status_values(
+                happiness_delta=update_data.get("happiness", 0),
+                energy_delta=update_data.get("energy", 0),
+                intimacy_delta=update_data.get("intimacy", 0),
+                boredom_delta=update_data.get("boredom", 0)
+            )
+        
+        # 同时解析 <|PET_COMMAND|> 格式的命令
+        if brain_state.response_text:
+            cleaned_text, command_data = self.status_manager.parse_llm_command(brain_state.response_text)
+            brain_state.text = cleaned_text or brain_state.text
+            if command_data:
+                self.status_manager.apply_command(command_data)
+        
+        return brain_state
+
+    async def ainvoke(self, brain_state: BrainState, config: Optional[RunnableConfig] = None, **kwargs) -> BrainState:
+        return self.invoke(brain_state, config, **kwargs)
+
+
 class BrainChatChain:
     """完整对话链"""
     
@@ -1377,6 +1442,7 @@ class BrainChatChain:
         environment_manager: Optional[EnvironmentManager] = None,
         memory_filter: Optional[Any] = None,
         use_time_stamped_memory: bool = True,
+        status_manager: Optional[Any] = None,
     ):
         self.dialogue_manager = dialogue_manager
         self.memory_manager = memory_manager
@@ -1389,6 +1455,7 @@ class BrainChatChain:
         self.environment_manager = environment_manager
         self.memory_filter = memory_filter
         self.use_time_stamped_memory = use_time_stamped_memory
+        self.status_manager = status_manager
         
         self.time_stamped_memory = None
         if self.use_time_stamped_memory:
@@ -1419,6 +1486,11 @@ class BrainChatChain:
             use_time_stamped_memory=self.use_time_stamped_memory
         )
         
+        # 心情状态注入中间件
+        mood_injection = MoodInjectionRunnable(
+            status_manager=self.status_manager
+        ) if self.status_manager else None
+        
         prompt_building = PromptBuildingRunnable(
             prompt_builder=self.prompt_builder,
             memory_manager=self.memory_manager,
@@ -1443,6 +1515,11 @@ class BrainChatChain:
             dialogue_manager=self.dialogue_manager
         )
         
+        # 心情状态提取中间件
+        mood_extraction = MoodExtractionRunnable(
+            status_manager=self.status_manager
+        ) if self.status_manager else None
+        
         memory_saving = MemorySavingRunnable(
             dialogue_manager=self.dialogue_manager,
             memory_manager=self.memory_manager,
@@ -1450,15 +1527,28 @@ class BrainChatChain:
             use_time_stamped_memory=self.use_time_stamped_memory
         )
         
-        self.chain = RunnableSequence(
+        # 构建链式序列，根据是否有状态管理器决定是否包含心情中间件
+        chain_steps = [
             topic_detection,
             command_parsing,
             user_memory_saving,
+        ]
+        
+        if mood_injection:
+            chain_steps.append(mood_injection)
+        
+        chain_steps.extend([
             prompt_building,
             ai_generation,
             response_parsing,
-            memory_saving
-        )
+        ])
+        
+        if mood_extraction:
+            chain_steps.append(mood_extraction)
+        
+        chain_steps.append(memory_saving)
+        
+        self.chain = RunnableSequence(*chain_steps)
     
     async def ainvoke(self, user_input: str, stream: bool = False, stream_callback=None, **kwargs) -> Dict[str, Any]:
         """异步调用对话链"""
@@ -1515,5 +1605,7 @@ __all__ = [
     "AIResponseGenerationRunnable",
     "ResponseParsingRunnable",
     "MemorySavingRunnable",
+    "MoodInjectionRunnable",
+    "MoodExtractionRunnable",
     "BrainChatChain",
 ]

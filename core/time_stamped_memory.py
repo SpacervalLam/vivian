@@ -208,7 +208,7 @@ Summary Requirements:
         ]
     
     def load_memory_variables(self, current_input: str) -> Dict[str, Any]:
-        """Load memory variables"""
+        """Load memory variables - optimized for token efficiency"""
         recent_summary = ""
         if self.summaries:
             recent_summary = self.summaries[-1].content
@@ -217,15 +217,18 @@ Summary Requirements:
         
         history_lines = []
         if recent_summary:
-            history_lines.append(f"[History Summary] {recent_summary}")
+            history_lines.append(f"[Summary] {recent_summary}")
         
-        for msg in context_window[-10:]:
+        history_count = 3 if recent_summary else 5
+        
+        for msg in context_window[-history_count:]:
             role = "User" if msg.message_type == "human" else "AI"
-            history_lines.append(f"{role}: {msg.content}")
+            truncated_content = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
+            history_lines.append(f"{role}: {truncated_content}")
         
-        for summary in self.summaries[-3:]:
-            if summary.content not in history_lines:
-                history_lines.append(f"{summary.content}")
+        for summary in self.summaries[-2:]:
+            if summary.content not in recent_summary:
+                history_lines.append(f"[Summary] {summary.content[:100]}")
         
         return {
             "recent_summary": recent_summary,

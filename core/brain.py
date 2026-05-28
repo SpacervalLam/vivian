@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 
 from loguru import logger
 
@@ -166,26 +166,21 @@ class Brain:
             except Exception as e:
                 logger.error(f"Failed to register window control tools: {e}")
 
-        self._init_tool_call_manager_v2()
-        logger.debug("Tool system V2 initialized")
+        self._init_tool_call_manager()
+        logger.debug("Tool system initialized")
 
-    def _init_tool_call_manager_v2(self):
-        """Initialize V2 tool call manager with permission context"""
-        try:
-            from core.tools.tool_call_manager_v2 import init_tool_call_manager_v2
-            self.tool_call_manager = init_tool_call_manager_v2(
-                tool_system=self.tool_system,
-                permission_context=self.permission_context,
-            )
-            self.tool_call_manager.set_max_iterations(10)
-            logger.debug("V2 Tool call manager initialized")
-        except Exception as e:
-            logger.error(f"Failed to initialize V2 tool call manager: {e}")
-            from core.tools.tool_call_manager import get_tool_call_manager
-            self.tool_call_manager = get_tool_call_manager()
+    def _init_tool_call_manager(self):
+        """Initialize tool call manager with permission context"""
+        from core.tools import init_tool_call_manager
+        self.tool_call_manager = init_tool_call_manager(
+            tool_system=self.tool_system,
+            permission_context=self.permission_context,
+        )
+        self.tool_call_manager.set_max_iterations(10)
+        logger.debug("Tool call manager initialized")
 
     def _init_permission_context(self):
-        """Initialize permission context for V2 tool system"""
+        """Initialize permission context for tool system"""
         try:
             self.permission_context = PermissionContext(
                 mode=PermissionMode.DEFAULT,
@@ -208,10 +203,10 @@ class Brain:
             logger.error(f"Failed to initialize permission context: {e}")
             self.permission_context = PermissionContext(mode=PermissionMode.BYPASS)
 
-    def _init_memory_manager(self):
+    def _init_memory_manager(self) -> None:
         """Initialize memory manager"""
         from core.memory_manager import MemoryManager
-        memory_config = {
+        memory_config: Dict[str, Union[str, int, float]] = {
             "memory_dir": self.memory_dir,
             "token_limit": 30000,
             "token_flush_size": 3000,
@@ -404,7 +399,7 @@ class Brain:
                 context={"keywords": topic["keywords"]},
             )
 
-    def _on_topic_activated(self, topic_id: str, context: Dict[str, Any]):
+    def _on_topic_activated(self, topic_id: str, context: Dict[str, Any]) -> None:
         """Handle topic activation callback"""
         logger.debug(f"Topic '{topic_id}' activated")
         if self.main_window and hasattr(self.main_window, 'live2d_widget'):
@@ -420,10 +415,10 @@ class Brain:
 
     def _update_topic_activation(self, user_input: str) -> Optional[str]:
         """Update topic activation and return gradual prompt"""
-        keywords = []
+        keywords: List[str] = []
         for activation in self.activation_gate.get_all_activations():
             if activation and not activation["callback_triggered"]:
-                topic_keywords = activation.get("context", {}).get("keywords", [])
+                topic_keywords: List[str] = activation.get("context", {}).get("keywords", [])
                 keywords.extend(topic_keywords)
                 if any(kw in user_input for kw in topic_keywords):
                     status = self.activation_gate.bump_topic(activation["topic_id"])

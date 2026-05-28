@@ -62,7 +62,6 @@ class Tool(
     工具基类
 
     完整的工具接口，包含所有必要的方法和属性。
-    参考 ClaudeCode 的 Tool 接口设计。
     """
 
     name: str
@@ -280,14 +279,32 @@ class Tool(
     def get_json_schema(self) -> Dict[str, Any]:
         """获取输入的JSON Schema"""
         if hasattr(self, "input_schema") and self.input_schema:
-            return self.input_schema.model_json_schema()
+            schema = self.input_schema.model_json_schema()
+            return self._clean_json_schema(schema)
         return {"type": "object", "properties": {}}
 
     def get_output_json_schema(self) -> Optional[Dict[str, Any]]:
         """获取输出的JSON Schema"""
         if self.output_schema:
-            return self.output_schema.model_json_schema()
+            schema = self.output_schema.model_json_schema()
+            return self._clean_json_schema(schema)
         return None
+
+    def _clean_json_schema(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """清理 JSON Schema，移除不必要的字段"""
+        cleaned = schema.copy()
+        # 移除 Pydantic 特定字段
+        for key in ['title', 'description']:
+            if key in cleaned:
+                del cleaned[key]
+        # 清理嵌套属性
+        if 'properties' in cleaned:
+            for prop_name, prop_schema in cleaned['properties'].items():
+                if isinstance(prop_schema, dict):
+                    for key in ['title']:
+                        if key in prop_schema:
+                            del prop_schema[key]
+        return cleaned
 
     def to_definition(self) -> Dict[str, Any]:
         """转换为工具定义"""
@@ -302,6 +319,14 @@ class Tool(
             "is_destructive": self.is_destructive.__code__ != Tool.is_destructive.__code__,
             "is_mcp": self.is_mcp,
         }
+
+    async def getDescription(
+        self,
+        input_data: Optional[InputSchema] = None,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """获取工具描述"""
+        return await self.get_description(input_data, options)
 
     def _emit_progress(self, progress: ToolProgress) -> None:
         """发送进度更新"""
@@ -402,7 +427,7 @@ def build_tool(
     """
     构建工具实例
 
-    类似于ClaudeCode的buildTool函数，用于从部分定义创建完整的工具实例。
+    用于从部分定义创建完整的工具实例。
 
     Args:
         name: 工具名称

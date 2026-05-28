@@ -326,7 +326,7 @@ class ScheduledToolCallTask(BaseTask):
     async def run(self, context: TaskContext) -> Any:
         """执行定时工具调用"""
         try:
-            from core.tools.tool_call_manager import get_tool_call_manager
+            from core.tools import get_tool_call_manager
             tool_call_manager = get_tool_call_manager()
             
             result = await tool_call_manager.execute_tool_call(

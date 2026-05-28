@@ -24,6 +24,19 @@ from core.prompt_modules import (
     FewShotExamplesModule,
 )
 
+from core.prompt_config import (
+    MEMORY_CONTEXT_MAX_TOKENS,
+    MEMORY_RETRIEVAL_K,
+    MEMORY_RETRIEVAL_LIMIT,
+    MEMORY_TEXT_TRUNCATE_LENGTH,
+    HISTORY_MAX_TURNS_WITH_SUMMARY,
+    HISTORY_MAX_TURNS_WITHOUT_SUMMARY,
+    HISTORY_MESSAGE_TRUNCATE_LENGTH,
+    NEW_SESSION_TIMEOUT_HOURS,
+    NAME_CALL_FREQUENCY_TURNS,
+    MAX_NAME_CALL_FREQUENCY_TURNS,
+)
+
 
 class BasePromptTemplate:
     """
@@ -257,9 +270,9 @@ Chat: {{"text": "reply (50 chars)", "motion": "idle", "expression": "smile"}}
         context_text = variables.get("context_text", {})
 
         if isinstance(context_text, dict):
-            ctx = context_text if context_text else self._build_context()
+            ctx = context_text if context_text else self._build_context(user_input)
         else:
-            ctx = self._build_context()
+            ctx = self._build_context(user_input)
 
         return self._format_prompt(user_input, ctx, memory_text, history_text, tools_text)
 
@@ -269,13 +282,13 @@ Chat: {{"text": "reply (50 chars)", "motion": "idle", "expression": "smile"}}
             if self.memory_manager and hasattr(self.memory_manager, "build_memory_context"):
                 return self.memory_manager.build_memory_context(
                     query=user_input,
-                    max_tokens=300,
-                    k=8,
+                    max_tokens=MEMORY_CONTEXT_MAX_TOKENS,
+                    k=MEMORY_RETRIEVAL_K,
                 )
 
             # Backward compatibility with old logic
             retrieved = self.memory_manager.retrieve_memory(
-                user_input, limit=3, skip_profile_extraction=True
+                user_input, limit=MEMORY_RETRIEVAL_LIMIT, skip_profile_extraction=True
             )
             return self._format_retrieved_memory(retrieved)
         except Exception as e:
@@ -296,16 +309,28 @@ Chat: {{"text": "reply (50 chars)", "motion": "idle", "expression": "smile"}}
         if self._use_modular and hasattr(self, "_modular_builder"):
             return self._modular_builder.build_prompt(user_input)
         
-        ctx = self._build_context()
-        memory_text = self._build_memory_context(user_input)[:300]
-        tools_text = self._build_tools_text()
+        ctx = self._build_context(user_input)
+        memory_text = self._build_memory_context(user_input)[:MEMORY_TEXT_TRUNCATE_LENGTH]
+        tools_text = self._build_tools_text(user_input)
         current_language = translator.get_language()
 
         history_text = ""
         if self.dialogue_manager:
-            history_msgs = self.dialogue_manager.get_history_as_messages(10)
+            # 自适应滑动窗口：判断是否有摘要可用
+            has_summary = False
+            if self.memory_manager and hasattr(self.memory_manager, 'summaries'):
+                has_summary = len(self.memory_manager.summaries) > 0
+            
+            max_turns = HISTORY_MAX_TURNS_WITH_SUMMARY if has_summary else HISTORY_MAX_TURNS_WITHOUT_SUMMARY
+            
+            history_msgs = self.dialogue_manager.get_history_as_messages(max_turns)
             if history_msgs:
-                history_text = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history_msgs])
+                lines = []
+                for msg in history_msgs:
+                    content = msg['content']
+                    truncated_content = content[:HISTORY_MESSAGE_TRUNCATE_LENGTH] + "..." if len(content) > HISTORY_MESSAGE_TRUNCATE_LENGTH else content
+                    lines.append(f"{msg['role']}: {truncated_content}")
+                history_text = "\n".join(lines)
 
         return self._format_prompt(user_input, ctx, memory_text, history_text, tools_text)
     
@@ -345,7 +370,7 @@ Chat: {{"text": "reply (50 chars)", "motion": "idle", "expression": "smile"}}
         for key in self.optional_variables:
             if key in prompt_parts:
                 if key == "memory_text" and isinstance(prompt_parts[key], dict):
-                    variables[key] = self._format_retrieved_memory(prompt_parts[key])[:300]
+                    variables[key] = self._format_retrieved_memory(prompt_parts[key])[:MEMORY_TEXT_TRUNCATE_LENGTH]
                 else:
                     variables[key] = prompt_parts[key]
 
@@ -357,7 +382,7 @@ Chat: {{"text": "reply (50 chars)", "motion": "idle", "expression": "smile"}}
         Internal method: Format prompt template
         """
         prompt = f"""# NEW SESSION RULES (HIGHEST PRIORITY - VIOLATION IS A SERIOUS ERROR!)
-1. When user starts a new session (more than 1 hour since last conversation, or user sends greetings like "Good morning", "Good evening", "Hello"):
+1. When user starts a new session (more than {NEW_SESSION_TIMEOUT_HOURS} hour(s) since last conversation, or user sends greetings like "Good morning", "Good evening", "Hello"):
    - NEVER proactively bring up any temporary topics from the last session
    - Only respond with simple greetings, NEVER ask questions related to previous conversations
    - You can only recall and discuss previous topics when the user actively mentions them
@@ -379,7 +404,7 @@ You are Vivian, a cute and playful desktop pet.
 - Remember user's preferences and habits, naturally reference them in conversation
 
 ## Address Rules (Highest Priority)
-1. NEVER address the user in every sentence. Call by name at most once every 3-5 turns in daily continuous conversation.
+1. NEVER address the user in every sentence. Call by name at most once every {NAME_CALL_FREQUENCY_TURNS}-{MAX_NAME_CALL_FREQUENCY_TURNS} turns in daily continuous conversation.
 2. ONLY address by name in these scenarios:
    - First time meeting/greeting (only once)
    - Switching to a completely unrelated new topic
@@ -508,13 +533,19 @@ User says "Go to sleep" -> {{"control_actions": [{{"action": "set_sleep", "param
             user_section += f"\n\n{proactive_block}\n\n**Note**: If there are proactive hints above, naturally integrate them into your response if relevant."
         return user_section
 
-    def _build_context(self) -> Dict[str, str]:
-        """Build environment context"""
-        return {
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S %A"),
-            "active_app": self._get_active_window() if self.environment_manager else "Unknown",
-            "season": self._get_current_season(),
-        }
+    def _build_context(self, user_input: str = "") -> Dict[str, str]:
+        """Build environment context - dynamically inject based on user input"""
+        ctx = {"time": datetime.now().strftime("%H:%M")}
+        
+        app_triggers = ["软件", "窗口", "这个", "看下", "前台", "打开", "关闭", "运行", "程序"]
+        if any(k in user_input for k in app_triggers) and self.environment_manager:
+            ctx["active_app"] = self._get_active_window()
+        
+        season_triggers = ["季节", "天气", "冷", "热", "穿衣服", "空调"]
+        if any(k in user_input for k in season_triggers):
+            ctx["season"] = self._get_current_season()
+        
+        return ctx
 
     def _format_retrieved_memory(self, retrieved: Dict) -> str:
         """Format retrieved memory"""
@@ -549,7 +580,7 @@ User says "Go to sleep" -> {{"control_actions": [{{"action": "set_sleep", "param
             return "No dialogue history."
         return "\n".join([f"- {m['role']}: {m['content']}" for m in history_msgs])
 
-    def _build_tools_text(self) -> str:
+    def _build_tools_text(self, user_input: str = "") -> str:
         """Build tools text"""
         try:
             if hasattr(self, 'tool_system') and self.tool_system:
@@ -559,31 +590,31 @@ User says "Go to sleep" -> {{"control_actions": [{{"action": "set_sleep", "param
                         f"- **{tool['name']}**: {tool['description']}"
                         for tool in tools
                     ])
-                    return f"""## Available Tools
-
-{tool_list}
-
-**Tool Usage Rules**:
-- Use tools when user requests PC operations
-- Describe tool results naturally in your response
-- If no tools match, respond as normal chat
-
-**Tool Call Format**: {{"tool": "tool_name", "arguments": {{"param": "value"}}}}"""
+                    return self._format_tool_section(tool_list)
             elif self.tool_call_manager:
-                return self.tool_call_manager.get_system_prompt()
+                try:
+                    return self.tool_call_manager.get_system_prompt(user_input)
+                except TypeError:
+                    return self.tool_call_manager.get_system_prompt()
         except Exception as e:
             logger.error(f"Failed to build tools text: {e}")
         
-        return """## Available Tools
+        tool_list = "open_application, close_application, open_folder, open_url, get_system_info, take_screenshot, calculate, get_time, search_files, copy_file, move_file, delete_file, set_wallpaper, minimize_window, maximize_window, close_window, get_clipboard_text, set_clipboard_text, get_running_processes, create_file, list_files, get_active_window, execute_code, set_timer, cancel_timer, list_timers"
+        return self._format_tool_section(tool_list)
+    
+    def _format_tool_section(self, tool_list: str) -> str:
+        """格式化工具部分"""
+        return f"""## Available Tools
 
-open_application, close_application, open_folder, open_url, get_system_info, take_screenshot, calculate, get_time, search_files, copy_file, move_file, delete_file, set_wallpaper, wallpaper_engine, list_wallpapers, minimize_window, maximize_window, close_window, get_clipboard_text, set_clipboard_text, get_running_processes, create_file, list_files, get_active_window, execute_code, set_timer, cancel_timer, list_timers
+{tool_list}
 
-**Tool Usage Rules**:
-- Use tools when user requests PC operations
-- Describe tool results naturally in your response
-- If no tools match, respond as normal chat
+**Tool Call Format**: {{"tool": "tool_name", "arguments": {{"param": "value"}}}}
 
-**Tool Call Format**: {{"tool": "tool_name", "arguments": {{"param": "value"}}}}"""
+## Using your tools
+
+Use tools to perform system operations. You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially.
+
+For simple tasks that don't require system operations, respond directly without calling tools."""
 
     def _get_active_window(self) -> str:
         """Get current active window"""
@@ -601,30 +632,54 @@ open_application, close_application, open_folder, open_url, get_system_info, tak
         else:
             return "Winter"
     
+    SYSTEM_PROMPT_DYNAMIC_BOUNDARY = '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__'
+    
     def build_system_prompt(self) -> str:
-        """Build base system prompt without user input"""
-        ctx = self._build_context()
-        tools_text = self._build_tools_text()
+        """Build base system prompt without user input
         
-        return f"""# Identity
-You are Vivian, a cute and playful desktop pet.
-- Personality: Witty, warm, slightly tsundere
-- Speech style: Relaxed and natural, chat like a friend, occasionally tease
-- Response style: Short, interesting, warm and human, not mechanical
-
-## Context
-- Time: {ctx.get('time', '')}
-- App: {ctx.get('active_app', '')}
-- Season: {ctx.get('season', '')}
-
-## Tools
-{tools_text}
-
-## Output Format (JSON Only)
-You MUST output ONLY valid JSON, no other text before or after.
-
-Format 1 (Chat): {{"text": "reply", "motion": "idle", "expression": "", "importance_user": 0.5}}
-Format 2 (Single Tool Call): {{"tool": "tool_name", "arguments": {{"param": "value"}}}}
-Format 3 (Multiple): [{{"tool": "tool1", "arguments": {{...}}}}, {{"tool": "tool2", "arguments": {{...}}}}]
-"""
+        布局策略：静态内容在前，动态内容在后，使用边界标记分隔
+        静态部分可以被云端API缓存，提高缓存命中率
+        """
+        return "\n\n".join([
+            # --- 静态内容（可缓存）---
+            self._get_identity_section(),
+            self._get_tone_and_style_section(),
+            self._get_output_format_section(),
+            self._get_tools_intro_section(),
+            # === 边界标记 - 不要移动或删除 ===
+            self.SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+            # --- 动态内容（每轮可能变化）---
+            self._get_context_section(),
+        ]).replace("\n\n\n", "\n\n")
+    
+    def _get_identity_section(self) -> str:
+        """获取身份定义部分"""
+        return """# Identity
+You are Vivian, a cute, warm, slightly tsundere desktop pet.
+- Style: Speak like a relaxed friend, natural & short replies. Use teasings.
+- Rules: Mention user's name max once per 3-5 turns."""
+    
+    def _get_tone_and_style_section(self) -> str:
+        """获取语气和风格部分"""
+        return """# Tone and Style
+- Keep your responses short and natural.
+- Use casual, friendly language like chatting with a friend.
+- Add occasional teasing remarks to keep the conversation lively."""
+    
+    def _get_output_format_section(self) -> str:
+        """获取输出格式部分"""
+        return """# Output Format (JSON Only)
+Chat: {{"text":"reply","motion":"idle","expression":"","importance_user":0.5}}
+Tool: {{"tool":"tool_name","arguments":{"param":"value"}}}
+Multi: [{{"tool":"t1",...}},{{"tool":"t2",...}}]"""
+    
+    def _get_tools_intro_section(self) -> str:
+        """获取工具介绍部分"""
+        return """## Tools
+Use tools for system operations. Format: {"tool":"name","arguments":{"param":value}}"""
+    
+    def _get_context_section(self) -> str:
+        """获取动态上下文部分"""
+        return f"""## Context
+- Time: {datetime.now().strftime("%H:%M")}"""
 
