@@ -42,7 +42,14 @@ class ProviderConfigWidget(QWidget):
         self.provider_data = provider_data or {
             'base_url': '',
             'api_key': '',
-            'model': ''
+            'model': '',
+            'use_proxy': False,
+            'proxy_type': 'http',
+            'proxy_host': '',
+            'proxy_port': None,
+            'proxy_auth': False,
+            'proxy_username': '',
+            'proxy_password': ''
         }
         
         self.init_ui()
@@ -124,11 +131,16 @@ class ProviderConfigWidget(QWidget):
         self.collapse_btn.setText("▲" if is_visible else "▼")
     
     def get_data(self):
-        return {
+        data = {
             'base_url': self.base_url_edit.text().strip(),
             'api_key': self.api_key_edit.text().strip(),
             'model': self.model_edit.text().strip()
         }
+        legacy_fields = ['use_proxy', 'proxy_type', 'proxy_host', 'proxy_port', 'proxy_auth', 'proxy_username', 'proxy_password']
+        for field in legacy_fields:
+            if field in self.provider_data:
+                data[field] = self.provider_data[field]
+        return data
 
 
 class AdvancedConfigWindow(QDialog):
@@ -420,7 +432,7 @@ class AdvancedConfigWindow(QDialog):
         self.system_radio.setChecked(mode == 'system')
         self.custom_radio.setChecked(mode == 'custom')
         self.proxy_url_edit.setEnabled(mode == 'custom')
-        self.test_btn.setEnabled(mode == 'custom' and self.proxy_url_edit.text().strip())
+        self.test_btn.setEnabled(mode == 'custom' and bool(self.proxy_url_edit.text().strip()))
     
     def update_provider_combo(self, combo):
         combo.clear()
@@ -441,7 +453,14 @@ class AdvancedConfigWindow(QDialog):
         self.providers[name] = {
             'base_url': '',
             'api_key': '',
-            'model': ''
+            'model': '',
+            'use_proxy': False,
+            'proxy_type': 'http',
+            'proxy_host': '',
+            'proxy_port': None,
+            'proxy_auth': False,
+            'proxy_username': '',
+            'proxy_password': ''
         }
         self.add_provider_widget(name, self.providers[name])
         self.update_all_routing_combos()

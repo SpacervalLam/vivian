@@ -24,6 +24,7 @@ class ModelRouter:
         """将路由矩阵标准化为完整配置格式，兼容旧格式"""
         providers = providers or {}
         normalized = {}
+        legacy_fields = ['use_proxy', 'proxy_type', 'proxy_host', 'proxy_port', 'proxy_auth', 'proxy_username', 'proxy_password']
         
         for task_type, entries in matrix.items():
             normalized_entries = []
@@ -31,12 +32,16 @@ class ModelRouter:
                 if isinstance(entry, str):
                     if entry in providers:
                         provider_config = providers[entry]
-                        normalized_entries.append({
+                        normalized_entry = {
                             'name': entry,
                             'base_url': provider_config.get('base_url', ''),
                             'api_key': provider_config.get('api_key', ''),
                             'model': provider_config.get('model', '')
-                        })
+                        }
+                        for field in legacy_fields:
+                            if field in provider_config:
+                                normalized_entry[field] = provider_config[field]
+                        normalized_entries.append(normalized_entry)
                 elif isinstance(entry, dict):
                     normalized_entries.append(entry)
             
@@ -51,6 +56,9 @@ class ModelRouter:
                 'api_key': default_config.get('api_key', ''),
                 'model': default_config.get('model', '')
             }
+            for field in legacy_fields:
+                if field in default_config:
+                    default_entry[field] = default_config[field]
             normalized = {
                 'chat': [default_entry],
                 'reasoning': [default_entry],
@@ -180,11 +188,14 @@ class ModelRouter:
                     return response.choices[0].message.content or ""
                     
             except (httpx.ConnectError, httpx.TimeoutException, Exception) as e:
+                current_provider = provider_name if 'provider_name' in locals() else (
+                    candidates[fallback_index][0] if fallback_index < len(candidates) else "unknown"
+                )
                 if not self.enable_fallback:
-                    logger.error(f"[Router] 通道 {provider_name} 异常: {e}，自动降级已禁用，直接抛出异常")
+                    logger.error(f"[Router] 通道 {current_provider} 异常: {e}，自动降级已禁用，直接抛出异常")
                     raise
                 
-                logger.warning(f"[Router Fallback] 通道 {provider_name} 异常: {e}，正在尝试自动熔断降级...")
+                logger.warning(f"[Router Fallback] 通道 {current_provider} 异常: {e}，正在尝试自动熔断降级...")
                 fallback_index += 1
         
         raise RuntimeError(f"任务 {task_type} 的所有配置模型均不可用")

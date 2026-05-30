@@ -217,24 +217,24 @@ class AIConfigWindow(QDialog):
             'model': config_manager.get("ai.model", ''),
             'temperature': config_manager.get("ai.temperature", 0.7),
             'max_tokens': config_manager.get("ai.max_tokens", 2000),
-            'use_proxy': config_manager.get("ai.use_proxy", False),
-            'proxy_type': config_manager.get("ai.proxy_type", 'http'),
-            'proxy_host': config_manager.get("ai.proxy_host", '127.0.0.1'),
-            'proxy_port': config_manager.get("ai.proxy_port", 7890),
-            'proxy_auth': config_manager.get("ai.proxy_auth", False),
-            'proxy_username': config_manager.get("ai.proxy_username", ''),
-            'proxy_password': config_manager.get("ai.proxy_password", ''),
             'local_model_path': config_manager.get("ai.local_model_path", ''),
             'local_model_n_ctx': config_manager.get("ai.local_model_n_ctx", 2048),
             'local_model_n_threads': config_manager.get("ai.local_model_n_threads", 4),
             'local_model_n_gpu_layers': config_manager.get("ai.local_model_n_gpu_layers", 0),
             'enable_local_proactive': config_manager.get("ai.enable_local_proactive", True),
             'embedding_model_path': config_manager.get("memory.embedding_model_path", ''),
-            'language': config_manager.get("base.language", "zh-CN")
+            'language': config_manager.get("base.language", "zh-CN"),
+            'use_proxy': config_manager.get("ai.use_proxy", False),
+            'proxy_type': config_manager.get("ai.proxy_type", "http"),
+            'proxy_host': config_manager.get("ai.proxy_host", ""),
+            'proxy_port': config_manager.get("ai.proxy_port", None),
+            'proxy_auth': config_manager.get("ai.proxy_auth", False),
+            'proxy_username': config_manager.get("ai.proxy_username", ""),
+            'proxy_password': config_manager.get("ai.proxy_password", "")
         }
         
         for key, value in self.config.items():
-            if value is None:
+            if value is None and key != 'proxy_port':
                 self.config[key] = ''
 
         # 加载高级配置数据
@@ -269,6 +269,7 @@ class AIConfigWindow(QDialog):
         """将旧的路由矩阵格式（字符串列表）迁移到新格式（完整配置列表）"""
         providers = providers or {}
         migrated = {}
+        legacy_fields = ['use_proxy', 'proxy_type', 'proxy_host', 'proxy_port', 'proxy_auth', 'proxy_username', 'proxy_password']
         
         for task_type, entries in matrix.items():
             migrated_entries = []
@@ -276,12 +277,16 @@ class AIConfigWindow(QDialog):
                 if isinstance(entry, str):
                     if entry in providers:
                         provider_config = providers[entry]
-                        migrated_entries.append({
+                        migrated_entry = {
                             'name': entry,
                             'base_url': provider_config.get('base_url', ''),
                             'api_key': provider_config.get('api_key', ''),
                             'model': provider_config.get('model', '')
-                        })
+                        }
+                        for field in legacy_fields:
+                            if field in provider_config:
+                                migrated_entry[field] = provider_config[field]
+                        migrated_entries.append(migrated_entry)
                 elif isinstance(entry, dict):
                     migrated_entries.append(entry)
             
@@ -296,6 +301,9 @@ class AIConfigWindow(QDialog):
                 'api_key': default_config.get('api_key', ''),
                 'model': default_config.get('model', '')
             }
+            for field in legacy_fields:
+                if field in default_config:
+                    default_entry[field] = default_config[field]
             migrated = {
                 'chat': [default_entry],
                 'reasoning': [default_entry],
@@ -306,7 +314,6 @@ class AIConfigWindow(QDialog):
     
     def _post_init(self):
         """初始化后的后续操作"""
-        self.update_proxy_ui_state()
         self.update_network_proxy_ui_state()
         self.center_window()
 
@@ -542,64 +549,6 @@ class AIConfigWindow(QDialog):
         local_layout.addWidget(self.enable_local_proactive_check, 2, 0, 1, 2)
         
         body_layout.addWidget(local_group)
-
-
-        proxy_group = QGroupBox(_("network_connection"))
-        proxy_group.setObjectName("ConfigGroup")
-        proxy_layout = QGridLayout(proxy_group)
-        proxy_layout.setVerticalSpacing(20)
-        
-        self.use_proxy_check = QCheckBox(_("enable_proxy_server"))
-        self.use_proxy_check.setFont(QFont("Microsoft YaHei", 18))
-        self.use_proxy_check.setFixedHeight(82)
-        self.use_proxy_check.setChecked(self.config['use_proxy'])
-        self.use_proxy_check.stateChanged.connect(self.update_proxy_ui_state)
-        proxy_layout.addWidget(self.use_proxy_check, 0, 0, 1, 2)
-
-        # 代理详情容器
-        self.proxy_details_widget = QWidget()
-        details_layout = QGridLayout(self.proxy_details_widget)
-        details_layout.setContentsMargins(0, 12, 0, 0)
-        details_layout.setSpacing(18)
-
-        self.proxy_type_combo = NoWheelComboBox()
-        self.proxy_type_combo.setFont(QFont("Microsoft YaHei", 18))
-        self.proxy_type_combo.setFixedHeight(28)
-        self.proxy_type_combo.setFixedWidth(195)
-        self.proxy_type_combo.addItems(['http', 'socks5'])
-        self.proxy_type_combo.setCurrentText(self.config['proxy_type'])
-        
-        self.proxy_host_edit = QLineEdit(self.config['proxy_host'])
-        self.proxy_host_edit.setFont(QFont("Microsoft YaHei", 18))
-        self.proxy_host_edit.setFixedHeight(28)
-        self.proxy_host_edit.setFixedWidth(285)
-        self.proxy_host_edit.setPlaceholderText("127.0.0.1")
-        
-        port_label = QLabel(_("proxy_port"))
-        port_label.setFont(QFont("Microsoft YaHei", 18))
-        
-        self.proxy_port_spin = NoWheelSpinBox()
-        self.proxy_port_spin.setFont(QFont("Microsoft YaHei", 18))
-        self.proxy_port_spin.setFixedHeight(28)
-        self.proxy_port_spin.setFixedWidth(100)
-        self.proxy_port_spin.setRange(1, 65535)
-        self.proxy_port_spin.setValue(self.config['proxy_port'] if self.config['proxy_port'] else 7890)
-
-        type_label = QLabel(_("proxy_type"))
-        type_label.setFont(QFont("Microsoft YaHei", 18))
-        
-        host_label = QLabel(_("proxy_host"))
-        host_label.setFont(QFont("Microsoft YaHei", 18))
-
-        details_layout.addWidget(type_label, 0, 0)
-        details_layout.addWidget(self.proxy_type_combo, 0, 1)
-        details_layout.addWidget(host_label, 0, 2)
-        details_layout.addWidget(self.proxy_host_edit, 0, 3)
-        details_layout.addWidget(port_label, 0, 4)
-        details_layout.addWidget(self.proxy_port_spin, 0, 5)
-
-        proxy_layout.addWidget(self.proxy_details_widget, 1, 0, 1, 2)
-        body_layout.addWidget(proxy_group)
 
         # --- 语言设置组 ---
         language_group = QGroupBox(_("language_settings"))
@@ -857,16 +806,11 @@ class AIConfigWindow(QDialog):
             
             self.endpoint_edit.setToolTip(f"默认地址: {defaults[text]['endpoint']}")
 
-    def update_proxy_ui_state(self):
-        """根据复选框状态显示/隐藏代理设置"""
-        is_enabled = self.use_proxy_check.isChecked()
-        self.proxy_details_widget.setVisible(is_enabled)
-
     def update_network_proxy_ui_state(self):
         """根据网络代理模式更新UI状态"""
         mode = self.network_config.get('proxy_mode', 'direct')
         self.network_proxy_url_edit.setEnabled(mode == 'custom')
-        self.test_btn.setEnabled(mode == 'custom' and self.network_proxy_url_edit.text().strip())
+        self.test_btn.setEnabled(mode == 'custom' and bool(self.network_proxy_url_edit.text().strip()))
         self.direct_radio.setChecked(mode == 'direct')
         self.system_radio.setChecked(mode == 'system')
         self.custom_radio.setChecked(mode == 'custom')
@@ -967,11 +911,6 @@ class AIConfigWindow(QDialog):
         self.config['enable_local_proactive'] = self.enable_local_proactive_check.isChecked()
         
         self.config['embedding_model_path'] = self.embedding_model_path_edit.text().strip()
-        
-        self.config['use_proxy'] = self.use_proxy_check.isChecked()
-        self.config['proxy_type'] = self.proxy_type_combo.currentText()
-        self.config['proxy_host'] = self.proxy_host_edit.text().strip()
-        self.config['proxy_port'] = self.proxy_port_spin.value()
         
         self.config['language'] = self.language_combo.currentData()
 

@@ -358,22 +358,83 @@ class BaseAIProvider:
         if base_url.endswith('/responses'):
             base_url = base_url.rsplit('/responses', 1)[0]
         
-        # 确保 base_url 是正确的（OpenAI SDK 会自动处理路径）
+        # 构建代理配置：优先使用新的 network_config，其次兼容旧的 provider 级代理配置
+        network_config = config_manager.get("network", {})
+        proxy_mode = network_config.get("proxy_mode", "direct")
+        
+        if proxy_mode == "direct":
+            if self.use_proxy and self.proxy_host:
+                proxy_url = f"{self.proxy_type}://{self.proxy_host}"
+                if self.proxy_port:
+                    proxy_url += f":{self.proxy_port}"
+                if self.proxy_auth and self.proxy_username:
+                    auth_part = f"{self.proxy_username}"
+                    if self.proxy_password:
+                        auth_part += f":{self.proxy_password}"
+                    proxy_url = proxy_url.replace("://", f"://{auth_part}@")
+                mounts = {"all://": proxy_url}
+            else:
+                mounts = None
+        else:
+            mounts = get_proxy_mounts(network_config)
+        
+        timeout = network_config.get("timeout", 30.0)
+        
         # 同步客户端
-        self._client = OpenAI(
-            base_url=base_url,
-            api_key=self.api_key,
-            timeout=60,
-            max_retries=2,
-        )
+        if mounts:
+            sync_http_client = httpx.Client(
+                mounts=mounts,
+                timeout=httpx.Timeout(timeout),
+                http2=True,
+                headers={'Accept-Encoding': 'gzip, deflate'},
+                retries=httpx.Retry(
+                    total=3,
+                    backoff_factor=1,
+                    status_codes=[429, 500, 502, 503, 504]
+                )
+            )
+            self._client = OpenAI(
+                base_url=base_url,
+                api_key=self.api_key,
+                timeout=timeout,
+                max_retries=3,
+                http_client=sync_http_client,
+            )
+        else:
+            self._client = OpenAI(
+                base_url=base_url,
+                api_key=self.api_key,
+                timeout=timeout,
+                max_retries=3,
+            )
         
         # 异步客户端（原生异步，无需asyncio.to_thread包装）
-        self._async_client = AsyncOpenAI(
-            base_url=base_url,
-            api_key=self.api_key,
-            timeout=60,
-            max_retries=2,
-        )
+        if mounts:
+            async_http_client = httpx.AsyncClient(
+                mounts=mounts,
+                timeout=httpx.Timeout(timeout),
+                http2=True,
+                headers={'Accept-Encoding': 'gzip, deflate'},
+                retries=httpx.Retry(
+                    total=3,
+                    backoff_factor=1,
+                    status_codes=[429, 500, 502, 503, 504]
+                )
+            )
+            self._async_client = AsyncOpenAI(
+                base_url=base_url,
+                api_key=self.api_key,
+                timeout=timeout,
+                max_retries=3,
+                http_client=async_http_client,
+            )
+        else:
+            self._async_client = AsyncOpenAI(
+                base_url=base_url,
+                api_key=self.api_key,
+                timeout=timeout,
+                max_retries=3,
+            )
 
     def _log_full_prompt_once(self, prompt: str) -> None:
         """仅在同一 provider 实例中首次遇到该 prompt 时输出完整日志，避免重复打印。"""

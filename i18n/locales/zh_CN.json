@@ -104,7 +104,7 @@
     "advanced_settings": "高级设置",
     "network_proxy_settings": "网络与代理设置",
     "proxy_mode": "代理模式",
-    "direct_mode": "直连模式",
+    "direct_mode": "不使用代理",
     "system_proxy": "跟随系统",
     "custom_proxy": "自定义代理",
     "proxy_address": "代理地址",

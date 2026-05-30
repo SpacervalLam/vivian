@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QPixmap, QIcon
 from PyQt5.QtCore import Qt, QSize
+from ui.styles import COLORS
 
 
 class ModernConfirmDialog(QDialog):
@@ -54,37 +55,37 @@ class ModernConfirmDialog(QDialog):
         layout.setSpacing(16)
 
         content_frame = QFrame()
-        content_frame.setStyleSheet("""
-            QFrame {
-                background-color: #FFFFFF;
+        content_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['bg_main']};
                 border-radius: 16px;
-                border: 1px solid #E8E8E8;
-                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-            }
+                border: 1px solid {COLORS['border']};
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+            }}
         """)
         content_layout = QVBoxLayout(content_frame)
         content_layout.setContentsMargins(24, 24, 24, 24)
         content_layout.setSpacing(20)
 
         title_label = QLabel(title)
-        title_label.setStyleSheet("""
-            QLabel {
-                color: #333333;
+        title_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_main']};
                 font-size: 18px;
                 font-weight: 600;
-            }
+            }}
         """)
         title_label.setAlignment(Qt.AlignCenter)
 
         icon_pixmap = self._get_icon_pixmap(icon_type)
 
         message_label = QLabel(message)
-        message_label.setStyleSheet("""
-            QLabel {
-                color: #666666;
+        message_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_secondary']};
                 font-size: 14px;
                 line-height: 1.6;
-            }
+            }}
         """)
         message_label.setAlignment(Qt.AlignCenter)
         message_label.setWordWrap(True)
@@ -94,21 +95,23 @@ class ModernConfirmDialog(QDialog):
 
         if cancel_text:
             cancel_btn = QPushButton(cancel_text)
-            cancel_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #F5F5F5;
-                    color: #666666;
-                    border: none;
+            cancel_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {COLORS['bg_card']};
+                    color: {COLORS['text_main']};
+                    border: 1px solid {COLORS['border']};
                     border-radius: 8px;
                     padding: 10px 24px;
                     font-size: 14px;
-                }
-                QPushButton:hover {
-                    background-color: #EEEEEE;
-                }
-                QPushButton:pressed {
-                    background-color: #E0E0E0;
-                }
+                }}
+                QPushButton:hover {{
+                    background-color: rgb(57, 65, 80);
+                    border-color: rgb(61, 70, 86);
+                }}
+                QPushButton:pressed {{
+                    background-color: rgb(35, 40, 49);
+                    border-color: rgb(43, 50, 61);
+                }}
             """)
             cancel_btn.clicked.connect(self._on_cancel)
             button_layout.addWidget(cancel_btn)
