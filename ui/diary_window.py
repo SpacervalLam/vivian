@@ -428,7 +428,7 @@ class DiaryWindow(QDialog):
     
     def _init_ui(self):
         """初始化UI"""
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMinimumSize(2100, 1200)
         self.resize(2300, 1400)

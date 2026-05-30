@@ -66,7 +66,7 @@ class SystemTray(QSystemTrayIcon):
         """打开日记本窗口"""
         from ui.diary_window import DiaryWindow
         
-        self.diary_window = DiaryWindow(parent=self.main_window)
+        self.diary_window = DiaryWindow()
         self.diary_window.show()
 
     def on_settings(self):

@@ -522,7 +522,7 @@ class MemoryItemDelegate(QWidget):
         """打开日记本窗口"""
         from ui.diary_window import DiaryWindow
         
-        self.diary_window = DiaryWindow(parent=self)
+        self.diary_window = DiaryWindow()
         self.diary_window.show()
 
     def reset_property_labels(self):
