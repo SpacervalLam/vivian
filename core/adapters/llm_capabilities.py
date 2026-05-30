@@ -543,7 +543,7 @@ class CapabilityNegotiator:
         return max(min(temperature, max_temp), min_temp)
 
     def validate_max_tokens(self, max_tokens: int) -> int:
-        """验证并修正最大令牌数"""
+        """验证并修正最大token数"""
         return min(max_tokens, self.capability.max_output_tokens)
 
     def get_degradation_strategy(

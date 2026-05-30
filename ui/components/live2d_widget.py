@@ -111,10 +111,6 @@ class Live2DWidget(QOpenGLWidget):
         self.wander_target_x = 0.0
         self.wander_target_y = 0.0
 
-        self.click_count = 0
-        self.last_click_time = 0
-        self.is_panicked = False
-
         self.target_mouth_open = 0.15
         self.current_mouth_open = 0.15
         self.mouth_smooth_speed = LIVE2D_RENDER_CONFIG.get("mouth_smooth_speed", 0.005)
@@ -498,44 +494,30 @@ class Live2DWidget(QOpenGLWidget):
         state_machine = self._external_managers.get("state_machine")
         expression_manager = self._external_managers.get("expression_manager")
 
-        if click_count_in_window >= 3:
-            if hasattr(self.parent(), "_show_input_window"):
-                self.parent()._show_input_window()
-                self.reset_click_count()
-                return
+        if clicked_area == "head":
             if expression_manager:
-                expression_manager.set_expression("cry", duration_ms=5000)
+                expression_manager.set_expression("shy", duration_ms=3000)
             if state_machine:
                 state_machine.notify_event(
-                    "triple_click", {"click_count": click_count_in_window}
+                    "click_head", {"click_count": click_count_in_window}
                 )
-        else:
-            if clicked_area == "head":
-                if expression_manager:
-                    expression_manager.set_expression("shy", duration_ms=3000)
-                if state_machine:
-                    state_machine.notify_event(
-                        "click_head", {"click_count": click_count_in_window}
-                    )
 
-            elif clicked_area == "body":
-                if expression_manager:
-                    expression_manager.set_expression("shy", duration_ms=3000)
-                if state_machine:
-                    state_machine.notify_event(
-                        "click_body", {"click_count": click_count_in_window}
-                    )
-            elif clicked_area == "model":
-                if expression_manager:
-                    expression_manager.set_expression("shy", duration_ms=3000)
-                if state_machine:
-                    state_machine.notify_event(
-                        "click", {"click_count": click_count_in_window}
-                    )
+        elif clicked_area == "body":
+            if expression_manager:
+                expression_manager.set_expression("shy", duration_ms=3000)
+            if state_machine:
+                state_machine.notify_event(
+                    "click_body", {"click_count": click_count_in_window}
+                )
+        elif clicked_area == "model":
+            if expression_manager:
+                expression_manager.set_expression("shy", duration_ms=3000)
+            if state_machine:
+                state_machine.notify_event(
+                    "click", {"click_count": click_count_in_window}
+                )
 
     def reset_click_count(self):
-        self.click_count = 0
-        self.is_panicked = False
         self.click_history = []
 
     def _check_system_resources(self):

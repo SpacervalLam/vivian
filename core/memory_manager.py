@@ -367,7 +367,7 @@ class MemoryBlock(BaseModel):
     name: str
     priority: int = Field(default=0, description="优先级（0=最高）")
     accept_short_term_memory: bool = Field(default=True)
-    token_limit: int = Field(default=1000, description="最大令牌数")
+    token_limit: int = Field(default=1000, description="最大token数")
     content: List[Memory] = Field(default_factory=list)
     
     def add_memory(self, memory: Memory) -> bool:

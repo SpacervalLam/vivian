@@ -943,7 +943,7 @@ class PromptBuildingRunnable(VivianRunnable[BrainState, BrainState]):
 
 
 class AIResponseGenerationRunnable(VivianRunnable[BrainState, BrainState]):
-    """AI 响应生成"""
+    """支持智能路由与故障自动降级的响应生成器"""
     
     def __init__(self, ai_manager, tool_call_manager=None, json_processor=None, 
                  emotion_analyzer=None, **kwargs):
@@ -952,6 +952,9 @@ class AIResponseGenerationRunnable(VivianRunnable[BrainState, BrainState]):
         self.tool_call_manager = tool_call_manager
         self.json_processor = json_processor
         self.emotion_analyzer = emotion_analyzer
+        
+        from core.model_router import get_model_router
+        self.router = get_model_router()
     
     async def ainvoke(
         self,
@@ -978,25 +981,37 @@ class AIResponseGenerationRunnable(VivianRunnable[BrainState, BrainState]):
         
         stream_callback = config.get("metadata.stream_callback")
         stream = config.get("metadata.stream", False)
+        task_type = config.get("metadata.task_type", "chat")
+        
+        if self.tool_call_manager and task_type == "chat":
+            task_type = "reasoning"
+        
         self._saved_immediate_text = None
         
         async def ai_generate_func(prompt: str) -> str:
-            if hasattr(self.ai_manager, "aquery_short"):
-                return await self.ai_manager.aquery_short(prompt, use_history=False)
-            else:
-                loop = asyncio.get_event_loop()
-                return await loop.run_in_executor(
-                    None, self.ai_manager.query_short, prompt, False
-                )
+            messages = [{"role": "user", "content": prompt}]
+            return await self.router.query_with_fallback(
+                task_type, messages, stream=False, 
+                temperature=0.7, max_tokens=2000
+            )
+        
+        async def ai_stream_generate_func(prompt: str, callback):
+            messages = [{"role": "user", "content": prompt}]
+            return await self.router.query_with_fallback(
+                task_type, messages, stream=True, 
+                temperature=0.7, max_tokens=2000,
+                stream_callback=callback
+            )
         
         try:
+            logger.info(f"[Router] 正在为任务类型 [{task_type}] 处理请求")
+            
             if self.tool_call_manager:
                 def on_immediate_response(immediate_text: str):
                     """即时回复回调 - 在工具执行前立即显示初步回复"""
                     if stream and stream_callback and immediate_text:
                         logger.info(f"[AIResponse] 即时回复: {immediate_text[:50]}...")
                         stream_callback(immediate_text)
-                    # 保存即时回复文本，之后会存入记忆
                     self._saved_immediate_text = immediate_text
                 
                 final_response, tool_calls = await self.tool_call_manager.execute_multi_step(
@@ -1007,7 +1022,6 @@ class AIResponseGenerationRunnable(VivianRunnable[BrainState, BrainState]):
                 input.response_text = final_response
                 input.tool_calls = tool_calls
                 input.tool_call_executed = True
-                # 保存即时回复到 input，以便后续存入记忆
                 input.immediate_response_text = self._saved_immediate_text
                 
                 if stream and stream_callback and input.response_text:
@@ -1025,13 +1039,8 @@ class AIResponseGenerationRunnable(VivianRunnable[BrainState, BrainState]):
         except Exception as e:
             logger.warning(f"[AIResponse] 工具调用失败，直接推理: {e}")
             try:
-                if stream and hasattr(self.ai_manager, "query_short_stream_async"):
-                    async for chunk in self.ai_manager.query_short_stream_async(
-                        input.system_prompt, use_history=False
-                    ):
-                        input.response_text += chunk
-                        if stream_callback:
-                            stream_callback(chunk)
+                if stream:
+                    input.response_text = await ai_stream_generate_func(input.system_prompt, stream_callback)
                 else:
                     input.response_text = await ai_generate_func(input.system_prompt)
                 
@@ -1403,8 +1412,8 @@ class MoodExtractionRunnable(RunnableSerializable[BrainState, BrainState]):
         if isinstance(parsed_res, list) and len(parsed_res) > 0:
             parsed_res = parsed_res[0]
         
-        if isinstance(parsed_res, dict) and "status_update" in parsed_res:
-            update_data = parsed_res["status_update"]
+        update_data = parsed_res.get("status_update", {})
+        if isinstance(update_data, dict):
             # 增量调用本地修改接口
             self.status_manager.update_status_values(
                 happiness_delta=update_data.get("happiness", 0),

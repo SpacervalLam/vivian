@@ -1139,6 +1139,14 @@ class DeskpetMainWindow(QMainWindow):
         self.customContextMenuRequested.connect(self.show_context_menu)
 
         self.context_menu = QMenu(self)
+        
+        # 心情状态显示
+        self.mood_status_action = QAction("当前心情", self)
+        self.mood_status_action.setEnabled(False)
+        
+        # 状态面板
+        self.status_panel_action = QAction("查看状态面板", self)
+        self.status_panel_action.triggered.connect(self._show_status_panel)
 
         self.show_action = QAction("显示", self)
         self.show_action.triggered.connect(self.show)
@@ -1163,6 +1171,9 @@ class DeskpetMainWindow(QMainWindow):
         self.quit_action.triggered.connect(self.close)
 
         self.context_menu.addSeparator()
+        self.context_menu.addAction(self.mood_status_action)
+        self.context_menu.addAction(self.status_panel_action)
+        self.context_menu.addSeparator()
         self.context_menu.addAction(self.show_action)
         self.context_menu.addAction(self.hide_action)
         self.context_menu.addSeparator()
@@ -1177,18 +1188,30 @@ class DeskpetMainWindow(QMainWindow):
 
         self.system_tray.tray_menu.clear()
         
-        self.tray_memory_visualization_action = QAction(_("memory_management"), self)
-        self.tray_memory_visualization_action.triggered.connect(
-            self._show_memory_visualization
-        )
-        self.system_tray.tray_menu.addAction(self.tray_memory_visualization_action)
+        # 记忆管理菜单
+        self.tray_memory_action = QAction(_("memory_management"), self)
+        self.tray_memory_action.triggered.connect(self.system_tray.on_memory)
+        self.system_tray.tray_menu.addAction(self.tray_memory_action)
         
+        # 日记本菜单
+        self.tray_diary_action = QAction(_("diary"), self)
+        self.tray_diary_action.triggered.connect(self.system_tray.on_diary)
+        self.system_tray.tray_menu.addAction(self.tray_diary_action)
+        
+        # 分隔线
+        self.system_tray.tray_menu.addSeparator()
+        
+        # 设置菜单
         self.settings_action = QAction(_("settings"), self)
         self.settings_action.triggered.connect(self.system_tray.on_settings)
         self.system_tray.tray_menu.addAction(self.settings_action)
         
+        # 分隔线
+        self.system_tray.tray_menu.addSeparator()
+        
+        # 退出菜单
         self.quit_action = QAction(_("quit"), self)
-        self.quit_action.triggered.connect(self.close)
+        self.quit_action.triggered.connect(self.system_tray.on_quit)
         self.system_tray.tray_menu.addAction(self.quit_action)
 
         self.system_tray.show()
@@ -1212,7 +1235,31 @@ class DeskpetMainWindow(QMainWindow):
         self.child_windows.append(self.memory_visualization_window)
 
     def show_context_menu(self, pos):
+        # 更新心情状态显示
+        if hasattr(self, 'pet_status_manager') and self.pet_status_manager:
+            status = self.pet_status_manager.status
+            mood = status.mood
+            mood_state = mood.derived_state
+            mood_icon = {"happy": "😊", "excited": "🥰", "tired": "😫", "sleepy": "😴", 
+                        "bored": "😒", "sad": "😢", "angry": "😠", "neutral": "😊"}.get(mood_state, "😊")
+            self.mood_status_action.setText(
+                f"{mood_icon} {mood_state} | 愉悦:{int(mood.happiness)} 精力:{int(mood.energy)} 亲密:{int(mood.intimacy)}"
+            )
         self.context_menu.exec_(self.mapToGlobal(pos))
+    
+    def _toggle_status_panel(self):
+        """切换状态面板显示/隐藏"""
+        from ui.components.status_panel import StatusPanel
+        pet_pos = self.pos()
+        
+        if not hasattr(self, 'status_panel') or self.status_panel is None:
+            self.status_panel = StatusPanel(parent=None, pet_pos=pet_pos)
+        
+        self.status_panel.toggle_panel(pet_pos)
+    
+    def _show_status_panel(self):
+        """显示状态面板"""
+        self._toggle_status_panel()
 
     def auto_resize(self):
         screen = QApplication.primaryScreen()
@@ -1300,7 +1347,8 @@ class DeskpetMainWindow(QMainWindow):
                     )
                     win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, original_style)
         elif event.button() == Qt.RightButton:
-            pass
+            # 右键点击桌宠时切换状态面板显示
+            self._toggle_status_panel()
 
     def mouseMoveEvent(self, event):
         if self.is_dragging and (event.buttons() & Qt.LeftButton):
@@ -2569,6 +2617,14 @@ class DeskpetMainWindow(QMainWindow):
                 logger.info("PetStatusManager 已关闭")
             except Exception as e:
                 logger.error(f"关闭PetStatusManager失败: {e}")
+
+        # 关闭主动交互管理器
+        if hasattr(self, 'brain') and hasattr(self.brain, 'proactive_process'):
+            try:
+                self.brain.proactive_process.shutdown()
+                logger.info("ProactiveProcess 已关闭")
+            except Exception as e:
+                logger.error(f"关闭ProactiveProcess失败: {e}")
 
         logger.info("关闭全局HTTP连接池...")
         try:

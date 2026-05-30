@@ -76,6 +76,33 @@ class ConfigManager:
                 "cache_dir": None,
                 "enable_local_proactive": True,
             },
+            "network": {
+                "proxy_mode": "direct",
+                "proxy_url": "",
+                "timeout": 30.0,
+            },
+            "providers": {
+                "silicon_flow": {
+                    "base_url": "https://api.siliconflow.cn/v1",
+                    "api_key": "",
+                    "model": "deepseek-ai/DeepSeek-V3",
+                },
+                "openai_proxy": {
+                    "base_url": "https://api.openai.com/v1",
+                    "api_key": "",
+                    "model": "gpt-4o-mini",
+                },
+                "local_ollama": {
+                    "base_url": "http://127.0.0.1:11434/v1",
+                    "api_key": "ollama",
+                    "model": "qwen2.5:7b",
+                },
+            },
+            "routing_matrix": {
+                "chat": ["silicon_flow", "local_ollama"],
+                "reasoning": ["openai_proxy", "silicon_flow"],
+                "diary": ["openai_proxy", "local_ollama"],
+            },
             "memory": {
                 "max_short_term_memory": 20,
                 "memory_importance_threshold": 0.7,

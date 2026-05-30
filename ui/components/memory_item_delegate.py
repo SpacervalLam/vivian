@@ -204,6 +204,28 @@ class MemoryItemDelegate(QWidget):
         """)
         action_layout.addWidget(self.refresh_button)
 
+        # 日记本按钮
+        self.diary_button = QPushButton(_("diary"))
+        self.diary_button.clicked.connect(self.on_open_diary)
+        self.diary_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_card']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
+                color: {COLORS['text_main']};
+                padding: 8px 16px;
+                font-size: 17px;
+            }}
+            QPushButton:hover {{
+                background-color: rgb(57, 65, 80);
+                border-color: {COLORS['border_focus']};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['bg_input']};
+            }}
+        """)
+        action_layout.addWidget(self.diary_button)
+
         action_layout.addStretch()
         layout.addLayout(action_layout)
 
@@ -495,6 +517,13 @@ class MemoryItemDelegate(QWidget):
             ToastNotification.show_notification(
                 _("delete_failed", error=str(e)), self, "error"
             )
+
+    def on_open_diary(self):
+        """打开日记本窗口"""
+        from ui.diary_window import DiaryWindow
+        
+        self.diary_window = DiaryWindow(parent=self)
+        self.diary_window.show()
 
     def reset_property_labels(self):
         """重置属性标签"""

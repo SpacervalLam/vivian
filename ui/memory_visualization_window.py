@@ -715,6 +715,7 @@ class ModernMemoryWindow(QMainWindow):
     def on_clear_all_memories(self):
         from ui.components.modern_confirm_dialog import ModernConfirmDialog
         from utils.i18n import _
+        from core.diary_system import get_diary_system
         
         reply = ModernConfirmDialog.confirm(
             self,
@@ -729,6 +730,10 @@ class ModernMemoryWindow(QMainWindow):
             try:
                 if self.memory_manager:
                     self.memory_manager.clear_all_memories()
+                
+                diary_system = get_diary_system()
+                diary_system.clear_all_entries()
+                
                 self.load_memory_data()
                 ModernConfirmDialog.confirm(
                     self,

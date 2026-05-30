@@ -5,6 +5,7 @@ import logging
 import os
 import random
 import time
+import urllib.request
 from collections import deque
 from typing import Any, Dict, Optional, Tuple, Type, List, Callable, AsyncGenerator
 from functools import lru_cache, wraps
@@ -24,48 +25,87 @@ from utils.config_manager import config_manager
 _async_http_session_pool = None
 _httpx_client = None
 _httpx_async_client = None
+_client_lock = threading.Lock()
 
 def get_http_session(max_retries=3, pool_size=10):
     """获取全局HTTP会话（使用httpx）"""
-    return get_httpx_client(http2=True)
+    network_config = config_manager.get("network", {})
+    return get_httpx_client(http2=True, network_config=network_config)
 
 async def get_async_http_session(max_retries=3, pool_size=10):
     """获取全局异步HTTP会话（使用httpx HTTP/2）"""
-    return await get_httpx_async_client(http2=True)
+    network_config = config_manager.get("network", {})
+    return await get_httpx_async_client(http2=True, network_config=network_config)
 
-def get_httpx_client(http2: bool = True):
+def get_proxy_mounts(network_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """根据配置解析 httpx 代理参数"""
+    mode = network_config.get("proxy_mode", "direct")
+    if mode == "direct":
+        return None
+    elif mode == "system":
+        proxies = urllib.request.getproxies()
+        return {k: v if v.startswith(('http://', 'https://', 'socks://', 'socks5://')) else f'http://{v}' for k, v in proxies.items()}
+    elif mode == "custom":
+        url = network_config.get("proxy_url", "")
+        if url:
+            return {"all://": url}
+    return None
+
+def get_httpx_client(http2: bool = True, network_config: Optional[Dict[str, Any]] = None):
     """获取全局HTTP/2客户端（同步）"""
     global _httpx_client
+    if network_config is None:
+        network_config = config_manager.get("network", {})
+    
+    mounts = get_proxy_mounts(network_config)
+    timeout = network_config.get("timeout", 30.0)
+    
     if _httpx_client is None:
-        _httpx_client = httpx.Client(
-            http2=http2,
-            timeout=60.0,
-            limits=httpx.Limits(
-                max_connections=10,
-                max_keepalive_connections=5,
-                keepalive_expiry=30.0
-            ),
-            headers={'Accept-Encoding': 'gzip, deflate'},
-            retries=httpx.Retry(
-                total=3,
-                backoff_factor=1,
-                status_codes=[429, 500, 502, 503, 504]
-            )
-        )
+        with _client_lock:
+            if _httpx_client is None:
+                logger.info(f"[Network] 初始化 httpx 同步连接池，代理挂载: {mounts}")
+                _httpx_client = httpx.Client(
+                    http2=http2,
+                    timeout=httpx.Timeout(timeout),
+                    limits=httpx.Limits(
+                        max_connections=20,
+                        max_keepalive_connections=5,
+                        keepalive_expiry=30.0
+                    ),
+                    headers={'Accept-Encoding': 'gzip, deflate'},
+                    mounts=mounts,
+                    retries=httpx.Retry(
+                        total=3,
+                        backoff_factor=1,
+                        status_codes=[429, 500, 502, 503, 504]
+                    )
+                )
     return _httpx_client
 
-async def get_httpx_async_client(http2: bool = True):
-    """获取全局HTTP/2客户端（异步）"""
+async def get_httpx_async_client(http2: bool = True, network_config: Optional[Dict[str, Any]] = None, force_reload: bool = False):
+    """动态获取或重建支持代理的全局异步 HTTP 客户端"""
     global _httpx_async_client
-    if _httpx_async_client is None:
+    
+    if network_config is None:
+        network_config = config_manager.get("network", {})
+    
+    with _client_lock:
+        if _httpx_async_client is not None and not force_reload:
+            return _httpx_async_client
+            
+        if _httpx_async_client is not None:
+            await _httpx_async_client.aclose()
+            
+        mounts = get_proxy_mounts(network_config)
+        timeout = network_config.get("timeout", 30.0)
+        
+        logger.info(f"[Network] 初始化 httpx 异步连接池，代理挂载: {mounts}")
+        
         _httpx_async_client = httpx.AsyncClient(
-            http2=http2,
-            timeout=60.0,
-            limits=httpx.Limits(
-                max_connections=10,
-                max_keepalive_connections=5,
-                keepalive_expiry=30.0
-            ),
+            mounts=mounts,
+            timeout=httpx.Timeout(timeout),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=5),
+            http2=True,
             headers={'Accept-Encoding': 'gzip, deflate'},
             retries=httpx.Retry(
                 total=3,
@@ -73,7 +113,21 @@ async def get_httpx_async_client(http2: bool = True):
                 status_codes=[429, 500, 502, 503, 504]
             )
         )
-    return _httpx_async_client
+        return _httpx_async_client
+
+async def test_proxy_connectivity(proxy_url: str, base_url: str = "https://api.openai.com") -> Tuple[bool, str]:
+    """供前端调用的代理连通性快速测试接口"""
+    try:
+        mounts = {"all://": proxy_url} if proxy_url else None
+        async with httpx.AsyncClient(mounts=mounts, timeout=5.0) as client:
+            start = time.time()
+            resp = await client.get(f"{base_url}/v1/models")
+            latency = int((time.time() - start) * 1000)
+            if resp.status_code in [200, 401]:
+                return True, f"连接成功 (延迟: {latency}ms)"
+            return False, f"服务器返回异常状态码: {resp.status_code}"
+    except Exception as e:
+        return False, f"连接失败: {str(e)}"
 
 async def close_global_sessions():
     """优雅停机：安全关闭并释放全局 HTTP 异步长连接池"""

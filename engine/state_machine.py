@@ -162,7 +162,6 @@ class StateMachine:
     def _setup_default_event_handlers(self):
         self.register_event_handler("click", self._handle_click)
         self.register_event_handler("double_click", self._handle_double_click)
-        self.register_event_handler("triple_click", self._handle_triple_click)
         self.register_event_handler("panic", self._handle_panic)
         self.register_event_handler("ai_response", self._handle_ai_response)
         self.register_event_handler("motion_end", self._handle_motion_end)
@@ -190,13 +189,6 @@ class StateMachine:
             return
 
         self.expression_manager.set_expression("eye_roll", duration_ms=2000)
-
-    def _handle_triple_click(self, meta: Dict):
-        if self.expression_manager.get_current_expression() == "eye_roll":
-            return
-
-        self.expression_manager.set_expression("cry", duration_ms=5000)
-        self.set_state(PetState.INTERACTING)
 
     def _handle_panic(self, meta: Dict):
         duration = meta.get("duration", 3000)

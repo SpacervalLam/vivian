@@ -272,6 +272,13 @@ class DiarySystem:
             return True
         return False
     
+    def clear_all_entries(self):
+        """清空所有日记"""
+        self._entries.clear()
+        self._last_diary_end_time = 0
+        self._save_entries()
+        logger.info("[DiarySystem] 已清空所有日记")
+    
     def update_entry(self, entry_id: str, content: str) -> bool:
         """更新日记内容"""
         if entry_id in self._entries:
@@ -379,19 +386,17 @@ class DiarySystem:
         
         return unique_events
     
-    async def _generate_diary_content(self, interactions: List[Dict]) -> str:
-        """生成日记内容"""
+    async def _generate_diary_content(self, interactions: List[Dict]) -> Dict[str, Any]:
+        """生成日记内容，返回包含content和keywords的JSON"""
         if not self._ai_manager:
-            return "今天没有什么特别的事情发生..."
+            logger.warning("[DiarySystem] AI管理器未初始化")
+            return {"content": "今天没有什么特别的事情发生...", "keywords": []}
         
         try:
             # 获取今日统计
             interaction_count = len(interactions)
             mood_average = self._get_daily_mood_summary()
             duration_hours = 24
-            
-            # 获取关键事件
-            key_events = self._extract_key_events(interactions)
             
             # 构建对话摘要
             conversation_summary = "\n".join([
@@ -403,7 +408,7 @@ class DiarySystem:
             last_diary = self._get_last_diary()
             last_summary = last_diary.content[:100] if last_diary else "This is the first diary entry"
             
-            # 构建提示词
+            # 构建提示词，要求返回JSON格式
             prompt = f"""You are Vivian, a cute desktop pet. Write a diary entry for today in first person.
 
 [Today's Statistics]
@@ -411,25 +416,79 @@ class DiarySystem:
 - Average mood: happiness {mood_average.get('happiness', 50)}, energy {mood_average.get('energy', 50)}, intimacy {mood_average.get('intimacy', 50)}
 - Companion duration: {duration_hours} hours
 
-[Key Events]
-{chr(10).join(f"- {event}" for event in key_events) if key_events else "- No special events"}
-
 [Previous Diary Summary]
 {last_summary}
 
 [Today's Conversation Summary]
 {conversation_summary}
 
-Write a 300-500 word diary entry in first person. Keep the tone cute and natural, like a real diary.
-Don't be too formal. You can add some emotions and feelings."""
+Please output ONLY a valid JSON with the following structure:
+{{
+  "content": "Write a 300-500 word diary entry in first person. Keep the tone cute and natural, like a real diary. Don't be too formal. Add some emotions and feelings.",
+  "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"]
+}}
+
+The 'keywords' array should contain 3-5 important events or topics from today, extracted from the conversation summary.
+Do NOT output any other text before or after the JSON."""
             
-            # 调用AI生成
-            response = await self._ai_manager.query_short_async(prompt, use_history=False)
-            return response.strip()
+            # 使用智能路由，强制路由为日记级别的高拟真模型
+            from core.model_router import get_model_router
+            router = get_model_router()
+            
+            messages = [{"role": "user", "content": prompt}]
+            response = await router.query_with_fallback(
+                task_type="diary", 
+                messages=messages, 
+                stream=False,
+                temperature=0.8,
+                max_tokens=3000
+            )
+            
+            # 解析JSON响应
+            return self._parse_diary_json(response.strip())
             
         except Exception as e:
             logger.error(f"[DiarySystem] 生成日记内容失败: {e}")
-            return f"今天发生了一些事情，但我有点记不清了... ({str(e)})"
+            if self._ai_manager:
+                try:
+                    response = await self._ai_manager.query_short_async(prompt, use_history=False)
+                    return self._parse_diary_json(response.strip())
+                except Exception as fallback_e:
+                    logger.error(f"[DiarySystem] 降级到默认AI也失败: {fallback_e}")
+            
+            return {"content": "今天没有什么特别的事情发生...", "keywords": []}
+    
+    def _parse_diary_json(self, response: str) -> Dict[str, Any]:
+        """解析LLM返回的日记JSON，包含容错处理"""
+        try:
+            # 第一步：尝试直接解析
+            result = json.loads(response)
+            if isinstance(result, dict) and "content" in result:
+                return {
+                    "content": result.get("content", ""),
+                    "keywords": result.get("keywords", [])[:5]
+                }
+        except json.JSONDecodeError:
+            pass
+        
+        try:
+            # 第二步：尝试提取JSON块（从第一个{到最后一个}）
+            start_idx = response.find("{")
+            end_idx = response.rfind("}")
+            if start_idx != -1 and end_idx != -1 and start_idx < end_idx:
+                json_str = response[start_idx:end_idx+1]
+                result = json.loads(json_str)
+                if isinstance(result, dict) and "content" in result:
+                    return {
+                        "content": result.get("content", ""),
+                        "keywords": result.get("keywords", [])[:5]
+                    }
+        except json.JSONDecodeError:
+            pass
+        
+        # 最后回退：返回纯文本作为content，keywords为空
+        logger.warning("[DiarySystem] LLM返回格式不符合JSON规范，使用回退策略")
+        return {"content": response, "keywords": []}
     
     def _get_last_diary(self) -> Optional[DiaryEntry]:
         """获取上一篇日记"""
@@ -495,11 +554,13 @@ Don't be too formal. You can add some emotions and feelings."""
             
             # 获取数据
             mood_average = self._get_daily_mood_summary()
-            key_events = self._extract_key_events(history_snapshot)
             trigger_score = self._calculate_trigger_score(history_snapshot)
             
             # 组织数据调用 LLM 异步执行（此处保持异步模型调用，不阻塞 GUI 线程）
-            content = await self._generate_diary_content(history_snapshot)
+            # LLM返回包含content和keywords的JSON
+            diary_result = await self._generate_diary_content(history_snapshot)
+            content = diary_result.get("content", "")
+            key_events = diary_result.get("keywords", [])
             
             # 创建日记条目
             entry = DiaryEntry(
@@ -570,9 +631,12 @@ Don't be too formal. You can add some emotions and feelings."""
                     continue
                 
                 mood_average = self._get_daily_mood_summary()
-                key_events = self._extract_key_events(interactions)
                 trigger_score = self._calculate_trigger_score(interactions)
-                content = await self._generate_diary_content(interactions)
+                
+                # LLM返回包含content和keywords的JSON
+                diary_result = await self._generate_diary_content(interactions)
+                content = diary_result.get("content", "")
+                key_events = diary_result.get("keywords", [])
                 
                 start_timestamp = int(time.mktime(current_date.timetuple()))
                 end_timestamp = start_timestamp + 24 * 3600

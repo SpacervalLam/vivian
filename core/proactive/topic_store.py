@@ -7,6 +7,7 @@
 - 支持session和topic两种存储模式
 """
 
+import atexit
 import json
 import os
 import threading
@@ -43,6 +44,17 @@ class TopicStore:
 
         # 加载存储
         self.load()
+
+        # 注册退出时自动保存
+        atexit.register(self._on_exit)
+
+    def _on_exit(self):
+        """程序退出时的回调，确保数据保存"""
+        try:
+            self.save(force=True)
+            logger.info(f"[TopicStore] 退出时已保存数据到: {self.store_path}")
+        except Exception as e:
+            logger.error(f"[TopicStore] 退出时保存失败: {e}")
 
     def _generate_topic_id(self) -> str:
         """生成唯一话题ID"""
@@ -310,6 +322,7 @@ class TopicStore:
         """从磁盘加载"""
         if not os.path.exists(self.store_path):
             logger.debug(f"[TopicStore] 存储文件不存在，创建新存储: {self.store_path}")
+            self.save(force=True)
             return
 
         try:
